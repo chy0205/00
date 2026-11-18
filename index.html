@@ -857,6 +857,8 @@
 
             <!-- V3.2 僅管理員使用：帳號管理 -->
             <div id="v3-users-panel" class="hidden mb-8 bg-white rounded-3xl border border-slate-200 shadow-sm p-5 md:p-7">
+                <button type="button" id="v3-users-toggle" onclick="v3ToggleUsersPanel()" aria-expanded="false" aria-controls="v3-users-content" class="w-full flex items-center justify-between text-left gap-3"><span><strong class="text-xl text-slate-800">👥 使用者管理</strong><small class="block text-slate-500 mt-1">點選展開，搜尋、新增及同步使用者</small></span><span id="v3-users-chevron" class="text-emerald-700 font-bold">展開 ▼</span></button>
+                <div id="v3-users-content" class="hidden mt-5">
                 <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
                     <div><h3 class="text-xl font-black text-slate-800">👥 使用者管理</h3><p class="text-sm text-slate-500 mt-1">帳號儲存於 GS，不顯示密碼。僅系統管理員可操作。</p></div>
                     <div class="flex gap-2"><button onclick="v3LoadUsers()" class="px-4 py-2 bg-slate-100 rounded-xl font-bold text-sm">重新整理</button><button onclick="v3OpenUserForm()" class="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm">＋ 新增帳號</button></div>
@@ -883,6 +885,7 @@
                     </div>
                     <p class="text-xs text-slate-500 mt-2">修改姓名或組別後，舊的登入識別將失效；既有歷史紀錄不會自動改名。</p>
                     <div class="flex gap-2 mt-4"><button onclick="v3SaveUserForm()" class="px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold">儲存</button><button onclick="document.getElementById('v3-user-editor').classList.add('hidden')" class="px-5 py-2 border rounded-xl">取消</button></div>
+                </div>
                 </div>
             </div>
             <div id="admin-group-filter-container"
@@ -3267,13 +3270,23 @@
         }
 
         // V3.2 使用者管理：所有操作由 GAS 驗證管理員權限。
-        let v3UsersList=[],v3EditingUser=null,v3ImportPlan=null;
+        let v3UsersList=[],v3EditingUser=null,v3ImportPlan=null,v3UsersLoaded=false;
         function v3IsAdmin() {return ['ADMIN','管理員'].includes(String(currentUser?.role||'').trim().toUpperCase());}
         function v3InitUsersPanel() {
             const panel=document.getElementById('v3-users-panel');
             if(!panel) return;
             panel.classList.toggle('hidden',!v3IsAdmin());
-            if(v3IsAdmin()) v3LoadUsers();
+            // 預設收合；進入管理儀表板不自動載入全部帳號。
+        }
+        function v3ToggleUsersPanel() {
+            if(!v3IsAdmin()) return;
+            const content=document.getElementById('v3-users-content');
+            const toggle=document.getElementById('v3-users-toggle');
+            const opening=content.classList.contains('hidden');
+            content.classList.toggle('hidden',!opening);
+            toggle.setAttribute('aria-expanded',String(opening));
+            document.getElementById('v3-users-chevron').textContent=opening?'收合 ▲':'展開 ▼';
+            if(opening && !v3UsersLoaded) v3LoadUsers();
         }
         function v3Escape(s) {
             return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -3287,6 +3300,7 @@
                 const result=await response.json();
                 if(!result.success) throw Error(result.error||'查詢失敗');
                 v3UsersList=result.data||[];
+                v3UsersLoaded=true;
                 v3RenderUsers();
             } catch(err) {status.textContent='讀取失敗：'+err.message;toast(err.message,true);}
         }
