@@ -861,6 +861,15 @@
                     <div><h3 class="text-xl font-black text-slate-800">👥 使用者管理</h3><p class="text-sm text-slate-500 mt-1">帳號儲存於 GS，不顯示密碼。僅系統管理員可操作。</p></div>
                     <div class="flex gap-2"><button onclick="v3LoadUsers()" class="px-4 py-2 bg-slate-100 rounded-xl font-bold text-sm">重新整理</button><button onclick="v3OpenUserForm()" class="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm">＋ 新增帳號</button></div>
                 </div>
+                <div class="mb-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
+                    <h4 class="font-black text-emerald-900">📥 USERS A／B 欄批次同步</h4>
+                    <p class="text-xs text-emerald-900 mt-1">在試算表 USERS（或 Users）工作表，A 欄填組別、B 欄填姓名。僅新增 GS 沒有的帳號，絕不覆蓋既有密碼、權限或註冊日期。</p>
+                    <div class="flex flex-wrap gap-2 mt-3">
+                        <button type="button" onclick="v3PreviewABImport()" class="px-4 py-2 bg-white border border-emerald-300 text-emerald-800 rounded-xl font-bold text-sm">檢查新增名單</button>
+                        <button type="button" id="v3-import-confirm" onclick="v3ConfirmABImport()" disabled class="px-4 py-2 bg-emerald-700 text-white rounded-xl font-bold text-sm disabled:opacity-40">確認同步至 GS</button>
+                    </div>
+                    <p id="v3-import-preview" class="text-sm mt-3 text-slate-700 whitespace-pre-wrap" aria-live="polite">請先點選「檢查新增名單」。</p>
+                </div>
                 <input id="v3-user-search" type="search" oninput="v3RenderUsers()" placeholder="搜尋組別、姓名或權限" class="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 mb-3">
                 <p id="v3-user-status" class="text-xs text-slate-500 mb-3" aria-live="polite"></p>
                 <div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead><tr class="text-slate-500 border-b"><th class="p-3">組別</th><th class="p-3">姓名</th><th class="p-3">權限</th><th class="p-3">註冊狀態</th><th class="p-3">操作</th></tr></thead><tbody id="v3-user-rows"></tbody></table></div>
@@ -3219,8 +3228,46 @@
 
         function logout() { if (confirm("確定登出？")) { localStorage.removeItem('sh_user_secure'); location.reload(); } }
 
+
+        async function v3PreviewABImport() {
+            const label=document.getElementById('v3-import-preview');
+            const btn=document.getElementById('v3-import-confirm');
+            btn.disabled=true;v3ImportPlan=null;label.textContent='正在檢查 USERS A／B 欄…';
+            try {
+                const response=await fetch(APPS_SCRIPT_URL+'?action=adminPreviewABImport');
+                const data=await response.json();
+                if(!data.success) throw Error(data.error||'預覽失敗');
+                const issues=(data.invalid?.length||0)+(data.duplicates?.length||0);
+                const lines=[
+                    '工作表：'+data.sheet,
+                    '預計新增：'+data.newCount+' 筆',
+                    'GS 已存在（跳過）：'+data.existing+' 筆',
+                    '空白列：'+data.blank+' 筆',
+                    '資料不完整列：'+(data.invalid?.join('、')||'無'),
+                    '重複資料列：'+(data.duplicates?.join('、')||'無')
+                ];
+                if(data.pending?.length) lines.push('新增預覽（最多 30 筆）：'+data.pending.map(u=>u.group+'／'+u.name).join('、'));
+                if(issues) lines.push('請先修正有問題的列，再重新檢查。');
+                label.textContent=lines.join('\n');
+                if(!issues&&data.newCount>0) {v3ImportPlan=data;btn.disabled=false;}
+            } catch(e) {label.textContent='檢查失敗：'+e.message;toast(e.message,true);}
+        }
+        async function v3ConfirmABImport() {
+            if(!v3ImportPlan||!v3ImportPlan.newCount) return;
+            if(!confirm('確定將 '+v3ImportPlan.newCount+' 筆新名單同步至 GS？既有帳號完全不覆蓋。')) return;
+            const btn=document.getElementById('v3-import-confirm');
+            btn.disabled=true;
+            try {
+                const result=await v3AdminPost({action:'adminSyncABImport'});
+                v3ImportPlan=null;
+                document.getElementById('v3-import-preview').textContent='同步完成！新增 '+result.added+' 筆，已存在跳過 '+result.skippedExisting+' 筆。既有密碼、權限及註冊資料不變。';
+                toast('名單同步完成，新增 '+result.added+' 筆');
+                await v3LoadUsers();
+            } catch(e) {toast(e.message,true);document.getElementById('v3-import-preview').textContent='同步失敗：'+e.message+'。請重新檢查名單。';}
+        }
+
         // V3.2 使用者管理：所有操作由 GAS 驗證管理員權限。
-        let v3UsersList=[],v3EditingUser=null;
+        let v3UsersList=[],v3EditingUser=null,v3ImportPlan=null;
         function v3IsAdmin() {return ['ADMIN','管理員'].includes(String(currentUser?.role||'').trim().toUpperCase());}
         function v3InitUsersPanel() {
             const panel=document.getElementById('v3-users-panel');
