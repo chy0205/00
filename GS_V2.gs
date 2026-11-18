@@ -3,7 +3,7 @@
  * 已修復：getTeamsData 缺失問題、重複函式清理、全成員點名邏輯整合、操作日誌系統
  */
 
-const SPREADSHEET_ID = '1jKcMtTuI9icxriEf9SzTF25c5ryPFnhQGjM6XhLQk0E';
+const SPREADSHEET_ID = '1sOH7UWJ6w55FHyHCvW_zW0rbCfrFWKtgzgEapUHj7ZI';
 
 /**
  * 處理 GET 請求：資料讀取
