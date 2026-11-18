@@ -207,6 +207,29 @@ function v3SaveUser(record) {
 }
 // 此函式只供 Apps Script 編輯器手動執行，不提供任何 HTTP 入口。
 // 不刪除原始工作表；先驗證全部資料成功複製，再啟用新儲存模式。
+// 遷移前檢查：只輸出重複的組別、姓名與來源列號，不輸出密碼。
+function inspectDuplicateUsersForMigration() {
+  if(v3UsersEnabled()) return {success:false,message:'已啟用 GS 帳號儲存，無須檢查原表'};
+  const sheet=v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID));
+  const rows=sheet.getDataRange().getValues();
+  const seen={},duplicates=[];
+  for(let i=1;i<rows.length;i++) {
+    const group=String(rows[i][0]||'').trim(),name=String(rows[i][1]||'').trim();
+    if(!group||!name||group==='組別') continue;
+    const key=JSON.stringify([group,name]);
+    if(!seen[key]) seen[key]=[];
+    seen[key].push(i+1);
+  }
+  Object.keys(seen).forEach(key=>{
+    if(seen[key].length>1) {
+      const parts=JSON.parse(key);
+      duplicates.push({group:parts[0],name:parts[1],rows:seen[key]});
+    }
+  });
+  const result={success:true,sheet:sheet.getName(),duplicateGroups:duplicates.length,duplicates};
+  Logger.log(JSON.stringify(result));
+  return result;
+}
 function migrateUsersToScriptProperties() {
   const lock=LockService.getScriptLock(); lock.waitLock(30000);
   try {
@@ -217,7 +240,7 @@ function migrateUsersToScriptProperties() {
       .map(r=>[String(r[0]).trim(),String(r[1]).trim(),String(r[2]||''),String(r[3]||'學員'),r[4] instanceof Date?r[4].toISOString():String(r[4]||'')]);
     if(!records.length) throw Error('來源工作表沒有帳號，已取消遷移');
     const keys=records.map(r=>v3UserKey(r[0],r[1]));
-    if(new Set(keys).size!==keys.length) throw Error('來源工作表存在重複的組別與姓名，請先處理，避免帳號被覆蓋');
+    if(new Set(keys).size!==keys.length) throw Error('來源工作表存在重複的組別與姓名；請先執行 inspectDuplicateUsersForMigration() 查看重複列號，避免帳號被覆蓋');
     const props=PropertiesService.getScriptProperties();
     const existing=props.getProperties();
     if(Object.keys(existing).some(k=>k.startsWith(V3_USER_PREFIX))) throw Error('偵測到先前未完成的遷移資料，請先人工核對，避免覆蓋');
