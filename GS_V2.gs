@@ -169,38 +169,94 @@ function logAction(user, group, action, detail, operator) {
 
 
 // 兼容既有 Users 與新名稱 USERS；不自動新增或搬移工作表，避免覆蓋既有帳號。
+// 帳號正式儲存於 Apps Script Script Properties，僅供後端存取。
+// 第一次遷移必須由專案擁有者手動執行 migrateUsersToScriptProperties()。
+// 遷移未啟用前仍讀取原 Users/USERS 工作表；成功後完全改由 GS 讀取。
+const V3_USER_PREFIX = 'V3_USER_';
+const V3_USER_ACTIVE = 'V3_USERS_ACTIVE';
 function v2UsersSheet(ss) {
   const sheet = ss.getSheetByName('USERS') || ss.getSheetByName('Users');
-  if (!sheet) throw Error('找不到 USERS 或 Users 工作表，請確認試算表中已有使用者名單');
+  if (!sheet) throw Error('找不到原有 USERS / Users 工作表；若已完成遷移，請確認 V3_USERS_ACTIVE');
   return sheet;
 }
-
-function getTeamsData() {
-  const cached = getFromCache("teams_data");
-  if (cached) return { success: true, data: cached };
-
+function v3UsersEnabled() {
+  return PropertiesService.getScriptProperties().getProperty(V3_USER_ACTIVE) === '1';
+}
+function v3UserKey(group,name) {
+  const id=JSON.stringify([String(group||'').trim(),String(name||'').trim()]);
+  const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,id);
+  return V3_USER_PREFIX + v2B64(digest);
+}
+function v3AllUsers() {
+  if (!v3UsersEnabled()) throw Error('帳號尚未完成遷移');
+  const props=PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(props).filter(k=>k.startsWith(V3_USER_PREFIX)).map(k=>JSON.parse(props[k]));
+}
+function v3GetUser(group,name) {
+  const raw=PropertiesService.getScriptProperties().getProperty(v3UserKey(group,name));
+  if(!raw) return null;
+  const record=JSON.parse(raw);
+  if(String(record[0]).trim()!==String(group).trim() || String(record[1]).trim()!==String(name).trim()) throw Error('帳號資料驗證失敗');
+  return record;
+}
+function v3SaveUser(record) {
+  const key=v3UserKey(record[0],record[1]);
+  const value=JSON.stringify(record);
+  if(Utilities.newBlob(value).getBytes().length>9000) throw Error('帳號紀錄超過 Script Properties 單筆容量限制');
+  PropertiesService.getScriptProperties().setProperty(key,value);
+}
+// 此函式只供 Apps Script 編輯器手動執行，不提供任何 HTTP 入口。
+// 不刪除原始工作表；先驗證全部資料成功複製，再啟用新儲存模式。
+function migrateUsersToScriptProperties() {
+  const lock=LockService.getScriptLock(); lock.waitLock(30000);
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = v2UsersSheet(ss);
-    if (!sheet) return { success: false, error: "找不到 Users 工作表。" };
-    
-    const rows = sheet.getDataRange().getValues();
-    const teams = {};
-    
-    for (let i = 1; i < rows.length; i++) {
-      const group = rows[i][0] ? rows[i][0].toString().trim() : "";
-      const name = rows[i][1] ? rows[i][1].toString().trim() : "";
-      
-      if (group && name && group !== "組別") {
-        if (!teams[group]) teams[group] = [];
-        if (teams[group].indexOf(name) === -1) teams[group].push(name);
-      }
-    }
-    putInCache("teams_data", teams, 21600); // 快取 6 小時
-    return { success: true, data: teams };
-  } catch (e) {
-    return { success: false, error: e.toString() };
-  }
+    if(v3UsersEnabled()) throw Error('已完成遷移，為避免覆蓋線上帳號，禁止重複執行');
+    const sheet=v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID));
+    const rows=sheet.getDataRange().getValues().slice(1);
+    const records=rows.filter(r=>String(r[0]||'').trim() && String(r[1]||'').trim() && String(r[0]).trim()!=='組別')
+      .map(r=>[String(r[0]).trim(),String(r[1]).trim(),String(r[2]||''),String(r[3]||'學員'),r[4] instanceof Date?r[4].toISOString():String(r[4]||'')]);
+    if(!records.length) throw Error('來源工作表沒有帳號，已取消遷移');
+    const keys=records.map(r=>v3UserKey(r[0],r[1]));
+    if(new Set(keys).size!==keys.length) throw Error('來源工作表存在重複的組別與姓名，請先處理，避免帳號被覆蓋');
+    const props=PropertiesService.getScriptProperties();
+    const existing=props.getProperties();
+    if(Object.keys(existing).some(k=>k.startsWith(V3_USER_PREFIX))) throw Error('偵測到先前未完成的遷移資料，請先人工核對，避免覆蓋');
+    // Script Properties 具有總容量上限；預估超量時直接停止，不啟用新模式。
+    const bytes=records.reduce((n,r)=>n+Utilities.newBlob(JSON.stringify(r)).getBytes().length,0);
+    if(bytes>350000) throw Error('帳號資料量過大，不適合 Script Properties，請改用獨立受限存取的帳號資料庫');
+    records.forEach(v3SaveUser);
+    const copied=records.every(r=>JSON.stringify(v3GetUser(r[0],r[1]))===JSON.stringify(r));
+    if(!copied || v3CountStoredUsers()!==records.length) throw Error('帳號資料複製驗證失敗，未切換新模式');
+    props.setProperty('V3_USERS_MIGRATED_AT',new Date().toISOString());
+    props.setProperty('V3_USERS_COUNT',String(records.length));
+    props.setProperty(V3_USER_ACTIVE,'1');
+    removeFromCache('teams_data');
+    return {success:true,migrated:records.length,active:true,message:'遷移完成。請先測試登入、註冊與報表，再自行備份並移除原工作表。'};
+  } finally {lock.releaseLock();}
+}
+function v3CountStoredUsers() {
+  return Object.keys(PropertiesService.getScriptProperties().getProperties()).filter(k=>k.startsWith(V3_USER_PREFIX)).length;
+}
+function verifyUsersMigration() {
+  if(!v3UsersEnabled()) return {success:false,active:false,message:'尚未遷移'};
+  const count=v3CountStoredUsers();
+  return {success:count===Number(PropertiesService.getScriptProperties().getProperty('V3_USERS_COUNT')),active:true,count:count};
+}
+function getTeamsData() {
+  const cached=getFromCache('teams_data');
+  if(cached) return {success:true,data:cached};
+  try {
+    const rows=v3UsersEnabled()?v3AllUsers():v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID)).getDataRange().getValues().slice(1);
+    const teams={};
+    rows.forEach(r=>{
+      const group=String(r[0]||'').trim(),name=String(r[1]||'').trim();
+      if(!group||!name||group==='組別') return;
+      if(!teams[group]) teams[group]=[];
+      if(!teams[group].includes(name)) teams[group].push(name);
+    });
+    putInCache('teams_data',teams,21600);
+    return {success:true,data:teams};
+  } catch(err) {return {success:false,error:String(err)};}
 }
 
 function legacyHandleRegister(data) { return v2Register(data); }
@@ -244,14 +300,14 @@ function getAttendanceReport(role, userGroup, bonusSheetName) {
     const sheets = ss.getSheets();
     const todayStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy/MM/dd");
     const attendanceSheet = ss.getSheetByName('簽到' + todayStr);
-    const userSheet = v2UsersSheet(ss);
+    const userRows = v3UsersEnabled()?v3AllUsers():v2UsersSheet(ss).getDataRange().getValues().slice(1);
     
     // 1. 獲取所有使用者 (過濾名單，徹底去除前後空格與大小寫容錯)
     const safeRole = (role || '').toString().toUpperCase();
     const safeUserGroup = (userGroup || '').toString().trim();
     const isFullAccess = safeRole.includes('ADMIN') || safeRole.includes('TEACHER') || safeRole.includes('管理員') || safeRole.includes('老師');
 
-    const allUsers = userSheet.getDataRange().getValues().slice(1)
+    const allUsers = userRows
       .map(u => ({
         group: u[0] ? u[0].toString().trim() : "",
         name: u[1] ? u[1].toString().trim() : ""
@@ -833,16 +889,16 @@ function v2Compare(a,b) {
   for (let i=0;i<Math.max(a.length,b.length);i++) d |= (a.charCodeAt(i)||0) ^ (b.charCodeAt(i)||0);
   return d===0;
 }
-function v2Users() {
-  const sh=v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID));
-  if(!sh) throw Error('找不到 Users 工作表');
-  return sh;
-}
 function v2Find(group,name) {
-  const sh=v2Users(), values=sh.getDataRange().getValues();
-  const i=values.findIndex((r,j)=>j>0 && String(r[0]).trim()===String(group).trim() && String(r[1]).trim()===String(name).trim());
-  return i<0 ? null : {sheet:sh,row:i+1,data:values[i]};
+  if(v3UsersEnabled()) {
+    const data=v3GetUser(group,name);
+    return data?{data:data,source:'script-properties'}:null;
+  }
+  const sh=v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID)),values=sh.getDataRange().getValues();
+  const i=values.findIndex((r,j)=>j>0&&String(r[0]).trim()===String(group).trim()&&String(r[1]).trim()===String(name).trim());
+  return i<0?null:{sheet:sh,row:i+1,data:values[i],source:'sheet'};
 }
+
 function v2Issue(user) {
   const payload=v2B64(v2Bytes(JSON.stringify({g:String(user.group),n:String(user.name),exp:Math.floor(Date.now()/1000)+V2_SESSION_SECONDS})));
   const sig=v2B64(Utilities.computeHmacSha256Signature(payload,v2Secret()));
@@ -871,8 +927,14 @@ function v2Register(data) {
     const u=v2Find(data.group,data.name);
     if(!u) return {success:false,error:'名單查無此人'};
     if(String(u.data[2]||'').trim()) return {success:false,error:'此帳號已註冊'};
-    u.sheet.getRange(u.row,3).setValue(pw);
-    u.sheet.getRange(u.row,5).setValue(new Date());
+    if(v3UsersEnabled()) {
+      const updated=u.data.slice();
+      updated[2]=pw; updated[4]=new Date().toISOString();
+      v3SaveUser(updated);
+    } else {
+      u.sheet.getRange(u.row,3).setValue(pw);
+      u.sheet.getRange(u.row,5).setValue(new Date());
+    }
     logAction(data.name,data.group,'註冊','V2 安全註冊',data.name);
     return {success:true};
   } finally { lock.releaseLock(); }
