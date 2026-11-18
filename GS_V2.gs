@@ -167,13 +167,21 @@ function logAction(user, group, action, detail, operator) {
 // 2. 使用者與組別管理
 // ==========================================
 
+
+// 兼容既有 Users 與新名稱 USERS；不自動新增或搬移工作表，避免覆蓋既有帳號。
+function v2UsersSheet(ss) {
+  const sheet = ss.getSheetByName('USERS') || v2UsersSheet(ss);
+  if (!sheet) throw Error('找不到 USERS 或 Users 工作表，請確認試算表中已有使用者名單');
+  return sheet;
+}
+
 function getTeamsData() {
   const cached = getFromCache("teams_data");
   if (cached) return { success: true, data: cached };
 
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName('Users');
+    const sheet = v2UsersSheet(ss);
     if (!sheet) return { success: false, error: "找不到 Users 工作表。" };
     
     const rows = sheet.getDataRange().getValues();
@@ -236,7 +244,7 @@ function getAttendanceReport(role, userGroup, bonusSheetName) {
     const sheets = ss.getSheets();
     const todayStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy/MM/dd");
     const attendanceSheet = ss.getSheetByName('簽到' + todayStr);
-    const userSheet = ss.getSheetByName('Users');
+    const userSheet = v2UsersSheet(ss);
     
     // 1. 獲取所有使用者 (過濾名單，徹底去除前後空格與大小寫容錯)
     const safeRole = (role || '').toString().toUpperCase();
@@ -826,7 +834,7 @@ function v2Compare(a,b) {
   return d===0;
 }
 function v2Users() {
-  const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Users');
+  const sh=v2UsersSheet(SpreadsheetApp.openById(SPREADSHEET_ID));
   if(!sh) throw Error('找不到 Users 工作表');
   return sh;
 }
