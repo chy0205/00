@@ -350,6 +350,46 @@
         }
         @media(prefers-reduced-motion:reduce) { .fade-in { animation:none; } .v3-quick-card:hover { transform:none; } }
 
+    
+        /* V3.1 管理後台與報表卡片一致化 */
+        #view-admin,#view-results,#view-questions { --v3-border:#e2e8f0; }
+        #view-admin > .flex:first-child,#view-results > .flex:first-child,#view-questions > .flex:first-child { padding:16px 4px 8px; }
+        #view-admin > .flex:first-child h2,#view-results > .flex:first-child h2,#view-questions > .flex:first-child h2 { font-size:clamp(21px,3vw,27px)!important; }
+        #admin-group-filter-container,#bonus-stats-container,#admin-homework-report-container,#quiz-config-container,
+        #view-results .grid > .glass-card,#view-results .grid > .bg-white,
+        #view-questions .glass-card { border-radius:25px!important; border:1px solid var(--v3-border); box-shadow:0 10px 30px rgba(15,23,42,.055); }
+        #bonus-stats-container { background:linear-gradient(180deg,#fff,#fbfffe); }
+        #admin-homework-report-container { background:linear-gradient(145deg,#fff,#f5f3ff); border-color:#ddd6fe; }
+        #admin-homework-report-container h3 { color:#4338ca!important; }
+        #attendance-report-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,285px),1fr)); gap:14px; }
+        #attendance-report-list > * { margin:0!important; min-width:0; border-radius:20px!important; }
+        #homework-report-list > * { border-radius:17px; }
+        #view-admin .mb-4.px-2 h3 { color:#334155!important; font-size:13px!important; letter-spacing:.06em; }
+        #view-admin button:not(.nav-item),#view-results button,#view-questions button { min-height:36px; }
+        #view-admin select,#view-results select,#view-questions select { background-color:#fff; }
+        #view-admin #quiz-config-container { background:linear-gradient(135deg,#172554,#0f172a)!important; border:1px solid #334155; }
+        #view-admin #quiz-config-container input { background:#1e293b; border:1px solid #475569!important; color:#fff; }
+        #view-admin #quiz-config-container label { color:#cbd5e1; }
+        #view-results .grid { gap:16px!important; }
+        #view-results .grid > div { min-width:0; border-radius:23px; }
+        .v3-admin-jump { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
+        .v3-admin-jump button { display:flex; gap:11px; align-items:center; padding:15px; text-align:left; background:#fff; border:1px solid #e2e8f0; border-radius:20px; box-shadow:0 6px 18px rgba(15,23,42,.04); cursor:pointer; }
+        .v3-admin-jump button:hover { border-color:#5eead4; background:#f0fdfa; }
+        .v3-admin-jump .v3-jump-icon { display:grid; place-items:center; width:39px; height:39px; flex-shrink:0; border-radius:13px; background:#ccfbf1; font-size:20px; }
+        .v3-admin-jump button:nth-child(2) .v3-jump-icon { background:#dbeafe; }
+        .v3-admin-jump button:nth-child(3) .v3-jump-icon { background:#ede9fe; }
+        .v3-admin-jump strong { font-size:13px; color:#0f172a; display:block; }
+        .v3-admin-jump small { font-size:11px; color:#64748b; display:block; margin-top:3px; }
+        @media(max-width:640px) {
+            .v3-admin-jump { grid-template-columns:1fr; gap:9px; }
+            .v3-admin-jump button { padding:12px 14px; border-radius:17px; }
+            #view-admin #bonus-stats-container,#view-admin #admin-homework-report-container,#view-admin #quiz-config-container { padding:18px!important; }
+            #view-admin .flex.justify-between { gap:10px; flex-wrap:wrap; }
+            #view-admin #admin-sync-attendance-btn,#view-admin #admin-region-report-btn { max-width:100%; white-space:normal; }
+            #view-admin #bonus-stats-container .h-64 { height:240px; }
+            #view-results .grid { grid-template-columns:minmax(0,1fr)!important; }
+        }
+
     </style>
 </head>
 
@@ -805,6 +845,13 @@
                     </svg>
                 </div>
                 <h2 class="text-2xl font-black text-slate-800">管理儀表板</h2>
+            </div>
+
+
+            <div class="v3-admin-jump" aria-label="管理區塊快速導覽">
+                <button type="button" onclick="document.getElementById('bonus-stats-container').scrollIntoView({behavior:'smooth',block:'start'})"><span class="v3-jump-icon" aria-hidden="true">📈</span><span><strong>加分統計</strong><small>查看圖表與歷次資料</small></span></button>
+                <button type="button" onclick="document.getElementById('attendance-report-list').scrollIntoView({behavior:'smooth',block:'start'})"><span class="v3-jump-icon" aria-hidden="true">📋</span><span><strong>出席報表</strong><small>查看點名與同步狀況</small></span></button>
+                <button type="button" onclick="document.getElementById('admin-homework-report-container').scrollIntoView({behavior:'smooth',block:'start'})"><span class="v3-jump-icon" aria-hidden="true">📚</span><span><strong>作業管理</strong><small>查詢主題與繳交紀錄</small></span></button>
             </div>
 
             <div id="admin-group-filter-container"
