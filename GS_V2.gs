@@ -1005,11 +1005,62 @@ function v2SignIn(p,user) {
     return legacyHandleSignIn({...p,group,name,admin:user.name});
   });
 }
+// V3.2 使用者管理：僅管理員可透過已驗證的工作階段操作。
+// 只回傳公開管理欄位，永不回傳密碼或雜湊。
+function v3UserPublic(r) {
+  return {group:String(r[0]||''),name:String(r[1]||''),role:String(r[3]||'學員'),registeredAt:String(r[4]||''),registered:!!String(r[2]||'')};
+}
+function v3AdminUsersList(user) {
+  v2Require(user,['admin']);
+  if(!v3UsersEnabled()) throw Error('請先完成 USERS 遷移，才能使用帳號管理');
+  return {success:true,data:v3AllUsers().map(v3UserPublic).sort((a,b)=>a.group.localeCompare(b.group,'zh-Hant')||a.name.localeCompare(b.name,'zh-Hant'))};
+}
+function v3AdminUserMutation(p,user) {
+  v2Require(user,['admin']);
+  if(!v3UsersEnabled()) throw Error('請先完成 USERS 遷移');
+  const action=String(p.action||'');
+  const group=String(p.group||'').trim(),name=String(p.name||'').trim();
+  if(!group||!name||group.length>80||name.length>80) throw Error('組別及姓名必填，且不得超過 80 字');
+  const role=String(p.role||'學員').trim();
+  if(!['ADMIN','TEACHER','LEADER','發布員','學員','管理員','老師','教師','組長'].includes(role)) throw Error('不支援的使用者權限');
+  return v2WithLock(()=>{
+    const existing=v3GetUser(group,name);
+    const props=PropertiesService.getScriptProperties();
+    if(action==='adminCreateUser') {
+      if(existing) throw Error('此組別與姓名已存在');
+      const password=String(p.password||'');
+      if(password && (password.length<8||password.length>128)) throw Error('初始密碼須為 8 至 128 字');
+      const stored=password?v2Digest(password,Utilities.getUuid()):'';
+      const record=[group,name,stored,role,password?new Date().toISOString():''];
+      v3SaveUser(record);
+    } else if(action==='adminUpdateUser') {
+      const oldGroup=String(p.oldGroup||'').trim(),oldName=String(p.oldName||'').trim();
+      const old=v3GetUser(oldGroup,oldName);
+      if(!old) throw Error('找不到原使用者');
+      if(oldGroup===user.group&&oldName===user.name && (group!==oldGroup||name!==oldName||v2Role(role)!=='admin')) throw Error('不能變更自己的帳號識別或取消自己的管理員權限');
+      if((oldGroup!==group||oldName!==name)&&existing) throw Error('新組別與姓名已有帳號');
+      const updated=old.slice();updated[0]=group;updated[1]=name;updated[3]=role;
+      v3SaveUser(updated);
+      if(oldGroup!==group||oldName!==name) props.deleteProperty(v3UserKey(oldGroup,oldName));
+    } else if(action==='adminResetUserPassword') {
+      if(!existing) throw Error('找不到使用者');
+      const password=String(p.password||'');
+      if(password.length<8||password.length>128) throw Error('新密碼須為 8 至 128 字');
+      const updated=existing.slice();
+      updated[2]=v2Digest(password,Utilities.getUuid());
+      updated[4]=updated[4]||new Date().toISOString();
+      v3SaveUser(updated);
+    } else throw Error('不支援的管理操作');
+    removeFromCache('teams_data');
+    return {success:true,message:'使用者資料已更新'};
+  });
+}
 function v2Get(e) {
   try {
     const p=e&&e.parameter||{}, action=String(p.action||'');
     const publicActions=['getTeamsData'];
     const session=publicActions.includes(action)?null:v2Session(p.token);
+    if(action==='adminListUsers') return JSONResponse(v3AdminUsersList(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
     if(action==='getAttendanceReport') {v2Require(session,['admin','teacher','leader']); p.role=session.role;p.group=session.group;}
     if(action==='getHomeworkReport') v2Require(session,['admin','teacher']);
@@ -1067,6 +1118,7 @@ function v2Post(e) {
     if(action==='login') return JSONResponse(v2Login(p));
     if(action==='register') return JSONResponse(v2Register(p));
     const user=v2Session(p.token);
+    if(['adminCreateUser','adminUpdateUser','adminResetUserPassword'].includes(action)) return JSONResponse(v3AdminUserMutation(p,user));
     const admin=['admin'],staff=['admin','teacher'],lead=['admin','teacher','leader'];
     const permissions={updateConfig:admin,updateAnnouncement:[...staff,'publisher'],updateHomeworkSettings:staff,createBonusSheet:admin,addBonusPoints:lead,uploadFile:['admin','teacher','leader','publisher','student'],saveTransferRecord:['admin','teacher','leader','publisher','student'],signIn:lead};
     if(permissions[action] && action!=='signIn') v2Require(user,permissions[action]);
