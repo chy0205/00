@@ -183,9 +183,12 @@ function v3UsersEnabled() {
   return PropertiesService.getScriptProperties().getProperty(V3_USER_ACTIVE) === '1';
 }
 function v3UserKey(group,name) {
-  const id=JSON.stringify([String(group||'').trim(),String(name||'').trim()]);
-  const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,id);
-  return V3_USER_PREFIX + v2B64(digest);
+  // UTF-8 JSON identity encoded losslessly: distinct (group,name) pairs have distinct keys.
+  // Avoid relying on ambiguous digest/charset handling during the one-time migration.
+  const identity=JSON.stringify([String(group||'').trim(),String(name||'').trim()]);
+  const key=V3_USER_PREFIX + Utilities.base64EncodeWebSafe(Utilities.newBlob(identity,'text/plain','identity').getBytes()).replace(/=+$/,'');
+  if(key.length>240) throw Error('組別或姓名過長，無法作為 Script Properties 帳號鍵值');
+  return key;
 }
 function v3AllUsers() {
   if (!v3UsersEnabled()) throw Error('帳號尚未完成遷移');
