@@ -1015,6 +1015,74 @@ function v3AdminUsersList(user) {
   if(!v3UsersEnabled()) throw Error('請先完成 USERS 遷移，才能使用帳號管理');
   return {success:true,data:v3AllUsers().map(v3UserPublic).sort((a,b)=>a.group.localeCompare(b.group,'zh-Hant')||a.name.localeCompare(b.name,'zh-Hant'))};
 }
+// V3.3：USERS/Users A、B 欄增量同步。C/D/E 永不讀取或覆寫。
+// 同步只新增 GS 中不存在的 (組別,姓名)；既有記錄完全不變。
+function v3GetImportSheet() {
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sh=ss.getSheetByName('USERS')||ss.getSheetByName('Users');
+  if(!sh) {
+    sh=ss.insertSheet('USERS');
+    sh.getRange(1,1,1,2).setValues([['組別','姓名']]);
+  }
+  return sh;
+}
+function v3ImportABPreview() {
+  if(!v3UsersEnabled()) throw Error('請先完成 USERS 帳號遷移');
+  const sh=v3GetImportSheet(), last=sh.getLastRow();
+  const rows=last>1?sh.getRange(2,1,last-1,2).getDisplayValues():[];
+  const props=PropertiesService.getScriptProperties().getProperties();
+  const seen=new Set(),pending=[],duplicates=[],invalid=[];
+  let existing=0,blank=0;
+  rows.forEach((r,i)=>{
+    const group=String(r[0]||'').trim(),name=String(r[1]||'').trim(),row=i+2;
+    if(!group&&!name){blank++;return;}
+    if(!group||!name){invalid.push(row);return;}
+    if(group==='組別'&&name==='姓名') {invalid.push(row);return;}
+    if(group.length>80||name.length>80){invalid.push(row);return;}
+    let key;
+    try {key=v3UserKey(group,name);} catch(e) {invalid.push(row);return;}
+    if(seen.has(key)){duplicates.push(row);return;}
+    seen.add(key);
+    if(Object.prototype.hasOwnProperty.call(props,key)) {existing++;return;}
+    pending.push({row,group,name});
+  });
+  return {success:true,sheet:sh.getName(),scanned:rows.length,existing,blank,duplicates,invalid,
+    newCount:pending.length,pending:pending.slice(0,30),_pending:pending};
+}
+function v3SyncImportAB() {
+  return v2WithLock(()=>{
+    const plan=v3ImportABPreview();
+    if(plan.invalid.length||plan.duplicates.length) throw Error('A/B 名單有不完整或重複資料，請先修正。缺漏列：'+plan.invalid.join(',')+'；重複列：'+plan.duplicates.join(','));
+    // 容量及筆數保守限制；超過時不寫入任何新資料。
+    if(plan._pending.length>500) throw Error('單次新增超過 500 筆，請分批匯入');
+    const props=PropertiesService.getScriptProperties();
+    const original=props.getProperties();
+    const toWrite={};
+    plan._pending.forEach(p=>{
+      const key=v3UserKey(p.group,p.name);
+      if(Object.prototype.hasOwnProperty.call(original,key)) return;
+      toWrite[key]=JSON.stringify([p.group,p.name,'','學員','']);
+    });
+    const currentBytes=Object.keys(original).reduce((n,k)=>n+Utilities.newBlob(k+original[k]).getBytes().length,0);
+    const addedBytes=Object.keys(toWrite).reduce((n,k)=>n+Utilities.newBlob(k+toWrite[k]).getBytes().length,0);
+    if(currentBytes+addedBytes>420000) throw Error('Script Properties 儲存容量接近上限，請停止匯入並評估資料庫');
+    if(Object.keys(toWrite).length) props.setProperties(toWrite,false);
+    removeFromCache('teams_data');
+    return {success:true,sheet:plan.sheet,added:Object.keys(toWrite).length,skippedExisting:plan.existing,blank:plan.blank,message:'已新增未註冊帳號，既有密碼、權限與註冊日期完全未修改'};
+  });
+}
+function v3AdminImportPreview(user) {
+  v2Require(user,['admin']);
+  const p=v3ImportABPreview();
+  delete p._pending;
+  return p;
+}
+// Apps Script 編輯器也可手動執行，須由有專案編輯權的人操作。
+function syncUsersABToScriptProperties() {
+  const result=v3SyncImportAB();
+  Logger.log(JSON.stringify(result));
+  return result;
+}
 function v3AdminUserMutation(p,user) {
   v2Require(user,['admin']);
   if(!v3UsersEnabled()) throw Error('請先完成 USERS 遷移');
@@ -1061,6 +1129,7 @@ function v2Get(e) {
     const publicActions=['getTeamsData'];
     const session=publicActions.includes(action)?null:v2Session(p.token);
     if(action==='adminListUsers') return JSONResponse(v3AdminUsersList(session));
+    if(action==='adminPreviewABImport') return JSONResponse(v3AdminImportPreview(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
     if(action==='getAttendanceReport') {v2Require(session,['admin','teacher','leader']); p.role=session.role;p.group=session.group;}
     if(action==='getHomeworkReport') v2Require(session,['admin','teacher']);
@@ -1118,6 +1187,7 @@ function v2Post(e) {
     if(action==='login') return JSONResponse(v2Login(p));
     if(action==='register') return JSONResponse(v2Register(p));
     const user=v2Session(p.token);
+    if(action==='adminSyncABImport') {v2Require(user,['admin']);return JSONResponse(v3SyncImportAB());}
     if(['adminCreateUser','adminUpdateUser','adminResetUserPassword'].includes(action)) return JSONResponse(v3AdminUserMutation(p,user));
     const admin=['admin'],staff=['admin','teacher'],lead=['admin','teacher','leader'];
     const permissions={updateConfig:admin,updateAnnouncement:[...staff,'publisher'],updateHomeworkSettings:staff,createBonusSheet:admin,addBonusPoints:lead,uploadFile:['admin','teacher','leader','publisher','student'],saveTransferRecord:['admin','teacher','leader','publisher','student'],signIn:lead};
