@@ -854,6 +854,28 @@
                 <button type="button" onclick="document.getElementById('admin-homework-report-container').scrollIntoView({behavior:'smooth',block:'start'})"><span class="v3-jump-icon" aria-hidden="true">📚</span><span><strong>作業管理</strong><small>查詢主題與繳交紀錄</small></span></button>
             </div>
 
+
+            <!-- V3.2 僅管理員使用：帳號管理 -->
+            <div id="v3-users-panel" class="hidden mb-8 bg-white rounded-3xl border border-slate-200 shadow-sm p-5 md:p-7">
+                <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                    <div><h3 class="text-xl font-black text-slate-800">👥 使用者管理</h3><p class="text-sm text-slate-500 mt-1">帳號儲存於 GS，不顯示密碼。僅系統管理員可操作。</p></div>
+                    <div class="flex gap-2"><button onclick="v3LoadUsers()" class="px-4 py-2 bg-slate-100 rounded-xl font-bold text-sm">重新整理</button><button onclick="v3OpenUserForm()" class="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm">＋ 新增帳號</button></div>
+                </div>
+                <input id="v3-user-search" type="search" oninput="v3RenderUsers()" placeholder="搜尋組別、姓名或權限" class="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 mb-3">
+                <p id="v3-user-status" class="text-xs text-slate-500 mb-3" aria-live="polite"></p>
+                <div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead><tr class="text-slate-500 border-b"><th class="p-3">組別</th><th class="p-3">姓名</th><th class="p-3">權限</th><th class="p-3">註冊狀態</th><th class="p-3">操作</th></tr></thead><tbody id="v3-user-rows"></tbody></table></div>
+                <div id="v3-user-editor" class="hidden mt-5 p-5 rounded-2xl border bg-slate-50">
+                    <h4 id="v3-user-form-title" class="font-black mb-3">新增帳號</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <label class="text-sm font-bold">組別<input id="v3-edit-group" maxlength="80" class="block w-full mt-1 p-3 border rounded-xl"></label>
+                        <label class="text-sm font-bold">姓名<input id="v3-edit-name" maxlength="80" class="block w-full mt-1 p-3 border rounded-xl"></label>
+                        <label class="text-sm font-bold">身分權限<select id="v3-edit-role" class="block w-full mt-1 p-3 border rounded-xl"><option value="學員">學員</option><option value="LEADER">組長</option><option value="TEACHER">老師</option><option value="發布員">發布員</option><option value="ADMIN">管理員</option></select></label>
+                        <label id="v3-new-password-label" class="text-sm font-bold">初始密碼（選填，空白則由使用者註冊）<input id="v3-edit-password" type="password" autocomplete="new-password" minlength="8" class="block w-full mt-1 p-3 border rounded-xl"></label>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">修改姓名或組別後，舊的登入識別將失效；既有歷史紀錄不會自動改名。</p>
+                    <div class="flex gap-2 mt-4"><button onclick="v3SaveUserForm()" class="px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold">儲存</button><button onclick="document.getElementById('v3-user-editor').classList.add('hidden')" class="px-5 py-2 border rounded-xl">取消</button></div>
+                </div>
+            </div>
             <div id="admin-group-filter-container"
                 class="hidden mb-6 bg-white p-5 rounded-3xl border shadow-sm flex items-center gap-4">
                 <span class="text-xs font-black text-slate-400 uppercase whitespace-nowrap">篩選組別</span>
@@ -1453,7 +1475,7 @@
             }
             if (viewName === 'quiz' && currentUser) loadQuizConfigs();
             if (viewName === 'results' && currentUser) loadHistoryData();
-            if (viewName === 'admin' && currentUser) loadAdminDashboard(true);
+            if (viewName === 'admin' && currentUser) { loadAdminDashboard(true); v3InitUsersPanel(); }
             if (viewName === 'questions' && currentUser) loadQuestionsView();
             if (viewName === 'img-transfer') setupImgTransfer();
             if (viewName === 'homework') {
@@ -3196,6 +3218,95 @@
         }
 
         function logout() { if (confirm("確定登出？")) { localStorage.removeItem('sh_user_secure'); location.reload(); } }
+
+        // V3.2 使用者管理：所有操作由 GAS 驗證管理員權限。
+        let v3UsersList=[],v3EditingUser=null;
+        function v3IsAdmin() {return ['ADMIN','管理員'].includes(String(currentUser?.role||'').trim().toUpperCase());}
+        function v3InitUsersPanel() {
+            const panel=document.getElementById('v3-users-panel');
+            if(!panel) return;
+            panel.classList.toggle('hidden',!v3IsAdmin());
+            if(v3IsAdmin()) v3LoadUsers();
+        }
+        function v3Escape(s) {
+            return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        async function v3LoadUsers() {
+            if(!v3IsAdmin()) return;
+            const status=document.getElementById('v3-user-status');
+            status.textContent='正在載入使用者資料…';
+            try {
+                const response=await fetch(APPS_SCRIPT_URL+'?action=adminListUsers');
+                const result=await response.json();
+                if(!result.success) throw Error(result.error||'查詢失敗');
+                v3UsersList=result.data||[];
+                v3RenderUsers();
+            } catch(err) {status.textContent='讀取失敗：'+err.message;toast(err.message,true);}
+        }
+        function v3RenderUsers() {
+            const query=document.getElementById('v3-user-search').value.trim().toLocaleLowerCase();
+            const users=v3UsersList.filter(u=>[u.group,u.name,u.role].some(v=>String(v||'').toLocaleLowerCase().includes(query)));
+            document.getElementById('v3-user-status').textContent='共 '+v3UsersList.length+' 筆，符合搜尋 '+users.length+' 筆';
+            const tbody=document.getElementById('v3-user-rows');tbody.replaceChildren();
+            users.forEach(u=>{
+                const tr=document.createElement('tr');tr.className='border-b border-slate-100';
+                [u.group,u.name,u.role,u.registered?'已註冊':'尚未註冊'].forEach(v=>{
+                    const td=document.createElement('td');td.className='p-3 whitespace-nowrap';td.textContent=v;tr.appendChild(td);
+                });
+                const td=document.createElement('td');td.className='p-3 whitespace-nowrap';
+                const edit=document.createElement('button');edit.className='text-emerald-700 font-bold mr-3';edit.textContent='編輯';edit.onclick=()=>v3OpenUserForm(u);
+                const reset=document.createElement('button');reset.className='text-amber-700 font-bold';reset.textContent='重設密碼';reset.onclick=()=>v3ResetPassword(u);
+                td.append(edit,reset);tr.appendChild(td);tbody.appendChild(tr);
+            });
+        }
+        function v3OpenUserForm(user=null) {
+            v3EditingUser=user?{group:user.group,name:user.name}:null;
+            document.getElementById('v3-user-editor').classList.remove('hidden');
+            document.getElementById('v3-user-form-title').textContent=user?'編輯使用者':'新增帳號';
+            document.getElementById('v3-edit-group').value=user?.group||'';
+            document.getElementById('v3-edit-name').value=user?.name||'';
+            const roleMap={'管理員':'ADMIN','老師':'TEACHER','教師':'TEACHER','組長':'LEADER'};
+            document.getElementById('v3-edit-role').value=roleMap[user?.role]||user?.role||'學員';
+            document.getElementById('v3-edit-password').value='';
+            document.getElementById('v3-new-password-label').classList.toggle('hidden',!!user);
+            document.getElementById('v3-user-editor').scrollIntoView({behavior:'smooth',block:'center'});
+        }
+        async function v3AdminPost(payload) {
+            const response=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
+            const result=await response.json();
+            if(!result.success) throw Error(result.error||'操作失敗');
+            return result;
+        }
+        async function v3SaveUserForm() {
+            const group=document.getElementById('v3-edit-group').value.trim();
+            const name=document.getElementById('v3-edit-name').value.trim();
+            const role=document.getElementById('v3-edit-role').value;
+            const password=document.getElementById('v3-edit-password').value;
+            if(!group||!name) return toast('請輸入組別及姓名',true);
+            if(!v3EditingUser&&password&&password.length<8) return toast('初始密碼至少 8 個字元',true);
+            const payload={action:v3EditingUser?'adminUpdateUser':'adminCreateUser',group,name,role};
+            if(v3EditingUser) Object.assign(payload,{oldGroup:v3EditingUser.group,oldName:v3EditingUser.name});
+            else payload.password=password;
+            if(v3EditingUser&&(group!==v3EditingUser.group||name!==v3EditingUser.name)&&!confirm('修改組別或姓名將影響登入識別，歷史紀錄不會自動改名。確定繼續？')) return;
+            try {
+                await v3AdminPost(payload);
+                document.getElementById('v3-user-editor').classList.add('hidden');
+                toast('使用者資料已儲存');
+                await v3LoadUsers();
+            } catch(err) {toast(err.message,true);}
+        }
+        async function v3ResetPassword(user) {
+            const password=prompt('請為「'+user.group+' / '+user.name+'」設定新密碼（至少 8 字元）：');
+            if(password===null) return;
+            if(password.length<8||password.length>128) return toast('密碼需為 8 至 128 字元',true);
+            if(!confirm('確定重設「'+user.name+'」的密碼？')) return;
+            try {
+                await v3AdminPost({action:'adminResetUserPassword',group:user.group,name:user.name,role:user.role,password});
+                toast('密碼已重設');
+                await v3LoadUsers();
+            } catch(err) {toast(err.message,true);}
+        }
+
         document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>
