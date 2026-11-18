@@ -170,7 +170,7 @@ function logAction(user, group, action, detail, operator) {
 
 // 兼容既有 Users 與新名稱 USERS；不自動新增或搬移工作表，避免覆蓋既有帳號。
 function v2UsersSheet(ss) {
-  const sheet = ss.getSheetByName('USERS') || v2UsersSheet(ss);
+  const sheet = ss.getSheetByName('USERS') || ss.getSheetByName('Users');
   if (!sheet) throw Error('找不到 USERS 或 Users 工作表，請確認試算表中已有使用者名單');
   return sheet;
 }
