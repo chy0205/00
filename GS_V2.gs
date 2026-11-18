@@ -1132,7 +1132,15 @@ function v2Get(e) {
     if(action==='adminPreviewABImport') return JSONResponse(v3AdminImportPreview(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
     if(action==='getAttendanceReport') {v2Require(session,['admin','teacher','leader']); p.role=session.role;p.group=session.group;}
-    if(action==='getHomeworkReport') v2Require(session,['admin','teacher']);
+    if(action==='getHomeworkReport') {
+      v2Require(session,['admin','teacher','leader']);
+      // 先以登入憑證判定權限，再於伺服器端過濾，不能信任前端傳來的組別。
+      if(session.level==='leader') {
+        const report=getHomeworkReport(p.topic);
+        if(report.success) report.data=(report.data||[]).filter(row=>String(row.group||'').trim()===String(session.group||'').trim());
+        return JSONResponse(report);
+      }
+    }
     if(action==='getBonusStats') v2Require(session,['admin','teacher','leader']);
     if(['getRegionReport','getConfig'].includes(action)) v2Require(session,['admin','teacher']);
     if(['getHistory','getUserHomeworkHistory','checkAttendance'].includes(action)) {
