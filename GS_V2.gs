@@ -1173,7 +1173,9 @@ function v2QuizQuestions(type) {
       const c0=(cells[0]||'').trim(),c1=(cells[1]||'').trim();
       const offset=(c0.length>0 && c0.length<=5 && /^[Qq\d\.\s]+$/.test(c0) && c1.length>c0.length)?1:0;
       const question=(cells[offset]||'').trim();
-      if(!question || question==='題目') return null;
+      // 排除中文／英文題庫欄位標題，避免把 question/options 當成第一題。
+      const normalizedQuestion=question.toLowerCase().replace(/\s+/g,'').replace(/[：:]/g,'');
+      if(!question || ['題目','題目內容','question','questions','questiontext'].includes(normalizedQuestion)) return null;
       const split=x=>String(x||'').split(/[,，\n;]+/).map(v=>v.trim()).filter(Boolean);
       return {question,type:(cells[offset+1]||'single').toLowerCase().trim(),options:split(cells[offset+2]),answer:split(cells[offset+3]),score:parseFloat(cells[offset+4])||0,
         photo:(cells[offset+5]||'').trim(),isBonus:['是','yes','true','y','1'].includes((cells[offset+6]||'').toLowerCase().trim())};
