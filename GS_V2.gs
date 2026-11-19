@@ -697,7 +697,11 @@ function handleSubmitQuiz(p) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheetName = '結果' + monthStr;
   let sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
-  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情'];
+  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情', '測驗梯次編號'];
+  const roundId=String(p.roundId||'');
+  if(!roundId || roundId!==v4QuizRound()) throw Error('測驗梯次已變更，請重新載入考卷');
+  if(!v4QuizWindow(handleGetConfig())) throw Error('測驗已關閉，無法提交');
+  if(v4QuizSubmitted(p.group,p.name,roundId)) throw Error('本梯次已提交考卷，不能重複提交');
   const ua = JSON.parse(p.userAnswersJson), qd = JSON.parse(p.quizDataJson);
   let score = 0;
   
@@ -733,6 +737,7 @@ function handleSubmitQuiz(p) {
   const rowData = new Array(finalHeaders.length).fill('');
   rowData[0] = new Date();
   rowData[1] = p.group; rowData[2] = p.name; rowData[3] = p.quizType; rowData[4] = score; rowData[5] = JSON.stringify(details);
+  rowData[finalHeaders.indexOf('測驗梯次編號')] = roundId;
 
   details.forEach((d, index) => {
      const qPrefix = `[Q${index + 1}]`;
@@ -1170,6 +1175,10 @@ function v2Get(e) {
     if(action==='adminListUsers') return JSONResponse(v3AdminUsersList(session));
     if(action==='adminPreviewABImport') return JSONResponse(v3AdminImportPreview(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
+    if(action==='getQuizStatus') {
+      const roundId=v4QuizRound();
+      return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:v4QuizSubmitted(session.group,session.name,roundId)});
+    }
     if(action==='getQuizQuestions') {
       v2Require(session,['admin','teacher','leader','student','publisher']);
       return JSONResponse({success:true,data:v2QuizQuestions(String(p.quizType||''))});
@@ -1253,7 +1262,10 @@ function v2Post(e) {
       if(String(p.group)!==user.group || String(p.name)!==user.name) throw Error('只能提交自己的資料');
     }
     if(['addBonusPoints','saveTransferRecord'].includes(action)) p.admin=user.name;
-    if(action==='submitQuiz') v2VerifyQuiz(p);
+    if(action==='submitQuiz') {
+      if(!p.roundId || String(p.roundId)!==v4QuizRound()) throw Error('測驗梯次已變更，請重新載入考卷');
+      v2VerifyQuiz(p);
+    }
     if(action==='createBonusSheet') return JSONResponse(v2WithLock(()=>handleCreateBonusSheet(user.name)));
     if(['addBonusPoints','submitHomework','submitQuiz','updateConfig','updateAnnouncement','updateHomeworkSettings'].includes(action))
       return v2WithLock(()=>legacyDoPost({postData:{contents:JSON.stringify(p)}}));
