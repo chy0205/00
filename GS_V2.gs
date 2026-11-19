@@ -759,19 +759,43 @@ function handleSubmitQuiz(p, trustedReceipt) {
 }
 
 function getHistory(group, name) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const history = [];
-  ss.getSheets().forEach(s => {
-    if (s.getName().indexOf('結果') === 0) {
-      const data = s.getDataRange().getValues();
-      data.slice(1).forEach(r => {
-        if (r[0] && r[1] == group && r[2] == name) {
-          history.push({ timestamp: r[0] instanceof Date ? Utilities.formatDate(r[0], "GMT+8", "yyyy-MM-dd HH:mm") : r[0].toString(), quizType: r[3], score: r[4], details: r[5] });
-        }
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  const history=[], officialRounds=new Set();
+  ss.getSheets().forEach(sh=>{
+    if(!sh.getName().startsWith('結果')||sh.getLastRow()<2)return;
+    const rows=sh.getDataRange().getValues();
+    const headers=rows[0],roundCol=headers.indexOf('測驗梯次編號');
+    rows.slice(1).forEach(r=>{
+      if(!r[0]||String(r[1]).trim()!==String(group).trim()||String(r[2]).trim()!==String(name).trim())return;
+      const roundId=roundCol>=0?String(r[roundCol]||''):'';
+      if(roundId)officialRounds.add(roundId);
+      history.push({
+        timestamp:r[0] instanceof Date?Utilities.formatDate(r[0],'GMT+8','yyyy-MM-dd HH:mm'):String(r[0]),
+        quizType:r[3],score:r[4],details:r[5],roundId,status:'已完成'
       });
-    }
+    });
   });
-  return { success: true, data: history.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)) };
+  const backup=ss.getSheetByName(QUIZ_RECEIPTS_SHEET);
+  if(backup&&backup.getLastRow()>1){
+    const rows=backup.getRange(2,1,backup.getLastRow()-1,11).getValues();
+    rows.forEach(r=>{
+      if(String(r[3]).trim()!==String(group).trim()||String(r[4]).trim()!==String(name).trim())return;
+      const roundId=String(r[2]||'');
+      if(officialRounds.has(roundId))return;
+      let details='[]';
+      try{
+        const p=JSON.parse(String(r[8]||'{}'));
+        details=JSON.stringify(quizGrade_(p).details);
+      }catch(err){console.error('考卷備份明細讀取失敗',err);}
+      history.push({
+        timestamp:r[0] instanceof Date?Utilities.formatDate(r[0],'GMT+8','yyyy-MM-dd HH:mm'):String(r[0]),
+        quizType:String(r[5]||''),score:Number(r[6]),details,
+        roundId,status:String(r[7]||'待補寫')
+      });
+    });
+  }
+  history.sort((a,b)=>new Date(b.timestamp.replace(' ','T'))-new Date(a.timestamp.replace(' ','T')));
+  return {success:true,data:history};
 }
 
 // ==========================================
