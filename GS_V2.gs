@@ -1012,6 +1012,23 @@ function v3UserPublic(r) {
 }
 // 僅供 Apps Script 編輯器手動執行：依組別與姓名找出指令碼屬性鍵值。
 // 僅在 Apps Script 編輯器手動執行；產生可篩選的帳號索引，不匯出密碼或系統金鑰。
+// 分頁查看全部 Script Properties。每次執行只輸出指定頁，避免紀錄截斷。
+// 密碼及系統金鑰不寫入執行紀錄；可依名稱到專案設定查看原值。
+function listAllScriptPropertyKeysInGS() {
+  const page=1; // 修改成 2、3、4... 查看下一頁
+  const pageSize=40;
+  const props=PropertiesService.getScriptProperties().getProperties();
+  const keys=Object.keys(props).sort();
+  const totalPages=Math.max(1,Math.ceil(keys.length/pageSize));
+  if(!Number.isInteger(page)||page<1||page>totalPages) throw Error('頁碼範圍：1～'+totalPages);
+  const start=(page-1)*pageSize;
+  Logger.log('全部指令碼屬性共 '+keys.length+' 筆；第 '+page+'/'+totalPages+' 頁');
+  keys.slice(start,start+pageSize).forEach((key,i)=>{
+    const val=String(props[key]||'');
+    const sensitive=/password|secret|token|key|credential|auth|code|V3_USER_/i.test(key);
+    Logger.log((start+i+1)+'. '+key+' = '+(sensitive?'[敏感資料，請在專案設定查看]':val));
+  });
+}
 function exportUserAccountIndexToSheet() {
   if(!v3UsersEnabled()) throw Error('尚未啟用 Script Properties 帳號儲存');
   const records=v3AllUsers().slice().sort((a,b)=>
