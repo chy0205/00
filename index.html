@@ -3044,34 +3044,52 @@
             content.innerHTML = h; window.scrollTo(0, 0);
         }
         async function handleQuizSubmit() {
-            const btn = document.getElementById('quiz-final-btn'); btn.disabled = true;
-            const answers = quizData.map((q, i) => {
-                let val = '未作答';
-                const qType = (q.type || 'single').toLowerCase();
-                const isFill = q.isBonus || qType === 'fill' || qType === 'text' || qType === '填充' || qType === '填空';
-                const isSingle = qType === 'single' || qType === 'radio' || qType === '單選' || qType === '單選題';
-
-                if (isFill) val = document.getElementById(`q${i + 1}-input`)?.value.trim() || '未作答';
-                else if (isSingle) val = document.querySelector(`input[name="q${i + 1}"]:checked`)?.value || '未作答';
-                else val = Array.from(document.querySelectorAll(`input[name="q${i + 1}"]:checked`)).map(i => i.value).sort().join(', ');
-                return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
-            });
+            const btn = document.getElementById('quiz-final-btn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = '正在提交考卷，請稍候…';
+            let timeoutId;
             try {
-                if (!quizData.length) throw new Error('考卷沒有題目，請重新載入後再提交');
-                const res = await fetch(APPS_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'submitQuiz', group: currentUser.group, name: currentUser.name, quizType: document.getElementById('quiz-type-select').value, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData) }) });
+                if (!currentUser || !currentUser.group || !currentUser.name) throw new Error('登入資料已失效，請重新登入');
+                if (!Array.isArray(quizData) || !quizData.length) throw new Error('考卷沒有題目，請重新載入');
+                const quizType = document.getElementById('quiz-type-select')?.value;
+                if (!quizType) throw new Error('請先選擇測驗科目');
+                const answers = quizData.map((q, i) => {
+                    let val = '未作答';
+                    const qType = String(q.type || 'single').toLowerCase();
+                    const isFill = q.isBonus || ['fill','text','填充','填空'].includes(qType);
+                    const isSingle = ['single','radio','單選','單選題'].includes(qType);
+                    if (isFill) val = document.getElementById(`q${i + 1}-input`)?.value.trim() || '未作答';
+                    else if (isSingle) val = document.querySelector(`input[name="q${i + 1}"]:checked`)?.value || '未作答';
+                    else val = Array.from(document.querySelectorAll(`input[name="q${i + 1}"]:checked`)).map(el => el.value).sort().join(', ') || '未作答';
+                    return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
+                });
+                const controller = new AbortController();
+                timeoutId = setTimeout(() => controller.abort(), 45000);
+                const res = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'submitQuiz', group: currentUser.group, name: currentUser.name,
+                        quizType, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData)
+                    }),
+                    signal: controller.signal
+                });
                 if (!res.ok) throw new Error('伺服器連線失敗（HTTP ' + res.status + '）');
                 const result = await res.json();
-                if (result.status === 'success' || (result.success === true && result.status !== 'error')) {
-                    toast('提交完成');
-                    switchView('results');
-                } else {
-                    throw new Error(result.error || result.message || '伺服器未確認考卷寫入成功');
-                }
+                if (result.status !== 'success') throw new Error(result.error || result.message || '伺服器未確認考卷寫入成功');
+                toast('考卷提交成功，成績已送出');
+                switchView('results');
             } catch (e) {
                 console.error('考卷提交失敗：', e);
-                toast('考卷未成功送出：' + (e.message || String(e)), true);
+                const message = e.name === 'AbortError'
+                    ? '等待超過45秒，結果可能已寫入，請先查詢成績紀錄，避免重複提交'
+                    : (e.message || String(e));
+                toast('考卷提交異常：' + message, true);
             } finally {
+                if (timeoutId) clearTimeout(timeoutId);
                 btn.disabled = false;
+                btn.textContent = originalText;
             }
         }
 
