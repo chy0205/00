@@ -1146,7 +1146,9 @@ function v2Get(e) {
       }
     }
     if(action==='getBonusStats') v2Require(session,['admin','teacher','leader']);
-    if(['getRegionReport','getConfig'].includes(action)) v2Require(session,['admin','teacher']);
+    // 測驗開放時間由所有已登入使用者共用；不能只允許管理員讀取 Config。
+    if(action==='getRegionReport') v2Require(session,['admin','teacher']);
+    if(action==='getConfig') v2Require(session,['admin','teacher','leader','student','publisher']);
     if(['getHistory','getUserHomeworkHistory','checkAttendance'].includes(action)) {
       const targetGroup=String(p.group||''),targetName=String(p.name||'');
       if(targetGroup!==session.group || targetName!==session.name) {
