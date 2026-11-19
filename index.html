@@ -2997,7 +2997,20 @@
             if (!currentQuizOpenStatus) return toast('非開放時段', true);
             const type = document.getElementById('quiz-type-select')?.value; if (!type) return toast('請選科目', true);
             document.getElementById('quiz-init').classList.add('hidden'); document.getElementById('quiz-main').classList.remove('hidden');
-            try { const [q1, q2] = await Promise.all([fetchSingleSheet(QUIZ_GIDS['隨堂']), fetchSingleSheet(QUIZ_GIDS[type])]); quizData = [...q1, ...q2]; renderQuiz(); } catch (e) { toast('讀取失敗', true); }
+            try {
+                const res = await fetch(`${APPS_SCRIPT_URL}?action=getQuizQuestions&quizType=${encodeURIComponent(type)}`);
+                if (!res.ok) throw new Error('題庫連線失敗（HTTP ' + res.status + '）');
+                const result = await res.json();
+                if (!result.success || !Array.isArray(result.data) || !result.data.length)
+                    throw new Error(result.error || '題庫沒有可用題目');
+                quizData = result.data;
+                renderQuiz();
+            } catch (e) {
+                console.error('考卷載入失敗：', e);
+                toast('讀取考卷失敗：' + (e.message || String(e)), true);
+                document.getElementById('quiz-init').classList.remove('hidden');
+                document.getElementById('quiz-main').classList.add('hidden');
+            }
         }
         function renderQuiz() {
             const content = document.getElementById('quiz-content'); if (!content) return;
