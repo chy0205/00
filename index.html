@@ -3064,7 +3064,7 @@
             h += `<button onclick="handleQuizSubmit()" id="quiz-final-btn" class="w-full py-5 btn-primary rounded-3xl font-black text-xl shadow-2xl mt-10">提交考卷</button>`;
             content.innerHTML = h; window.scrollTo(0, 0);
         }
-        async function handleQuizSubmit() {
+        async async function handleQuizSubmit() {
             const btn = document.getElementById('quiz-final-btn');
             if (!btn || btn.disabled) return;
             btn.disabled = true;
@@ -3086,20 +3086,25 @@
                     else val = Array.from(document.querySelectorAll(`input[name="q${i + 1}"]:checked`)).map(el => el.value).sort().join(', ') || '未作答';
                     return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
                 });
-                const controller = new AbortController();
-                timeoutId = setTimeout(() => controller.abort(), 45000);
-                const res = await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        action: 'submitQuiz', group: currentUser.group, name: currentUser.name,
-                        quizType, roundId: activeQuizRoundId, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData)
-                    }),
-                    signal: controller.signal
-                });
-                if (!res.ok) throw new Error('伺服器連線失敗（HTTP ' + res.status + '）');
-                const result = await res.json();
-                if (result.status !== 'success') throw new Error(result.error || result.message || '伺服器未確認考卷寫入成功');
-                toast('考卷提交成功，成績已送出');
+                const key='quiz_pending_'+[activeQuizRoundId,currentUser.group,currentUser.name].map(encodeURIComponent).join('_');
+                let payload;
+                const saved=localStorage.getItem(key);
+                if(saved) payload=JSON.parse(saved);
+                else {
+                    payload={action:'receiveQuiz',submissionId:crypto.randomUUID(),
+                        group:currentUser.group,name:currentUser.name,quizType,
+                        roundId:activeQuizRoundId,userAnswersJson:JSON.stringify(answers),
+                        quizDataJson:JSON.stringify(quizData)};
+                    localStorage.setItem(key,JSON.stringify(payload));
+                }
+                const controller=new AbortController();
+                timeoutId=setTimeout(()=>controller.abort(),45000);
+                const res=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
+                if(!res.ok)throw Error('伺服器連線失敗（HTTP '+res.status+'）');
+                const result=await res.json();
+                if(!result.success||!result.received)throw Error(result.error||'伺服器尚未確認收件');
+                localStorage.removeItem(key);
+                toast('考卷已收件，本次成績 '+result.score+' 分'+(result.status==='已完成'?'':'；正式成績正在補寫'));
                 switchView('results');
             } catch (e) {
                 console.error('考卷提交失敗：', e);
