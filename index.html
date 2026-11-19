@@ -3057,9 +3057,22 @@
                 return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
             });
             try {
+                if (!quizData.length) throw new Error('考卷沒有題目，請重新載入後再提交');
                 const res = await fetch(APPS_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'submitQuiz', group: currentUser.group, name: currentUser.name, quizType: document.getElementById('quiz-type-select').value, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData) }) });
-                if ((await res.json()).status === 'success') { toast('提交完成'); switchView('results'); }
-            } catch (e) { btn.disabled = false; }
+                if (!res.ok) throw new Error('伺服器連線失敗（HTTP ' + res.status + '）');
+                const result = await res.json();
+                if (result.status === 'success' || (result.success === true && result.status !== 'error')) {
+                    toast('提交完成');
+                    switchView('results');
+                } else {
+                    throw new Error(result.error || result.message || '伺服器未確認考卷寫入成功');
+                }
+            } catch (e) {
+                console.error('考卷提交失敗：', e);
+                toast('考卷未成功送出：' + (e.message || String(e)), true);
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         async function fetchSingleSheet(gid) {
