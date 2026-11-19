@@ -779,6 +779,37 @@ function handleGetConfig() {
   return config;
 }
 
+function v4QuizRound() {
+  const props=PropertiesService.getScriptProperties();
+  let id=props.getProperty('V4_QUIZ_ROUND_ID');
+  if(!id) {
+    id=Utilities.getUuid();
+    props.setProperty('V4_QUIZ_ROUND_ID',id);
+  }
+  return id;
+}
+function v4QuizWindow(config) {
+  const c=config['隨堂']||{};
+  const parse=v=>{
+    if(!v)return NaN;
+    const m=String(v).trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
+    return m?new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]).getTime():NaN;
+  };
+  const now=Date.now(),start=parse(c.start),end=parse(c.end);
+  return Number.isFinite(start)&&Number.isFinite(end)&&now>=start&&now<=end;
+}
+function v4QuizSubmitted(group,name,roundId) {
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  for(const sh of ss.getSheets()) {
+    if(!sh.getName().startsWith('結果')||sh.getLastRow()<2)continue;
+    const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+    const col=headers.indexOf('測驗梯次編號')+1;
+    if(!col)continue;
+    const data=sh.getRange(2,1,sh.getLastRow()-1,Math.max(3,col)).getValues();
+    if(data.some(row=>String(row[1]).trim()===String(group).trim()&&String(row[2]).trim()===String(name).trim()&&String(row[col-1])===roundId))return true;
+  }
+  return false;
+}
 function handleUpdateConfig(configStr) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = ss.getSheetByName('Config') || ss.insertSheet('Config');
@@ -788,6 +819,14 @@ function handleUpdateConfig(configStr) {
     let found = false;
     for(let i=1; i<data.length; i++) { if(data[i][0] == key) { sheet.getRange(i+1, 2, 1, 2).setValues([[updates[key].start, updates[key].end || ""]]); found = true; break; } }
     if(!found) sheet.appendRow([key, updates[key].start, updates[key].end || ""]);
+  }
+  // 只有由關閉轉為開放時才建立新梯次；修改結束時間不會重設已提交資格。
+  if(updates['隨堂']) {
+    const previous={};
+    data.slice(1).forEach(r=>{if(r[0])previous[String(r[0])]={start:r[1],end:r[2]};});
+    const next=Object.assign({},previous,updates);
+    if(!v4QuizWindow(previous)&&v4QuizWindow(next))
+      PropertiesService.getScriptProperties().setProperty('V4_QUIZ_ROUND_ID',Utilities.getUuid());
   }
   removeFromCache("sys_config"); // 清除快取
   return { success: true };
