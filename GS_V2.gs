@@ -692,16 +692,9 @@ function getUserHomeworkHistory(group, name) {
 // 6. 測驗與成績
 // ==========================================
 
-function handleSubmitQuiz(p) {
-  const monthStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy/MM");
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheetName = '結果' + monthStr;
-  let sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
-  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情', '測驗梯次編號'];
-  const roundId=String(p.roundId||'');
-  if(!roundId || roundId!==v4QuizRound()) throw Error('測驗梯次已變更，請重新載入考卷');
-  if(!v4QuizWindow(handleGetConfig())) throw Error('測驗已關閉，無法提交');
-  if(v4QuizSubmitted(p.group,p.name,roundId)) throw Error('本梯次已提交考卷，不能重複提交');
+
+// Single scoring source for receipt and official results.
+function quizGrade_(p) {
   const ua = JSON.parse(p.userAnswersJson), qd = JSON.parse(p.quizDataJson);
   let score = 0;
   
@@ -712,6 +705,20 @@ function handleSubmitQuiz(p) {
     return { question: q.question, userAnswer: u.userAnswer, correctAnswer: [].concat(q.answer).join(','), isCorrect, photo: q.photo };
   });
 
+  return {score,details};
+}
+
+function handleSubmitQuiz(p, trustedReceipt) {
+  const monthStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy/MM");
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheetName = '結果' + monthStr;
+  let sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情', '測驗梯次編號'];
+  const roundId=String(p.roundId||'');
+  if(!trustedReceipt && (!roundId || roundId!==v4QuizRound())) throw Error('測驗梯次已變更，請重新載入考卷');
+  if(!trustedReceipt && !v4QuizWindow(handleGetConfig())) throw Error('測驗已關閉，無法提交');
+  if(v4QuizSubmitted(p.group,p.name,roundId)) throw Error('本梯次已提交考卷，不能重複提交');
+  const {score,details}=quizGrade_(p);
   details.forEach((d, index) => {
     const qPrefix = `[Q${index + 1}]`;
     const h1 = `${qPrefix} 正確答案`, h2 = `${qPrefix} 學員作答`, h3 = `${qPrefix} 是否答對`;
@@ -1175,6 +1182,12 @@ function v2Get(e) {
     if(action==='adminListUsers') return JSONResponse(v3AdminUsersList(session));
     if(action==='adminPreviewABImport') return JSONResponse(v3AdminImportPreview(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
+    if(action==='getQuizReceipt') {
+      const rec=quizReceiptById_(String(p.submissionId||''));
+      if(!rec)return JSONResponse({success:true,received:false});
+      if(String(rec.data[3])!==session.group||String(rec.data[4])!==session.name)throw Error('無權查詢此考卷');
+      return JSONResponse(quizReceiptStatus_(rec));
+    }
     if(action==='getQuizStatus') {
       const roundId=v4QuizRound();
       return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:v4QuizSubmitted(session.group,session.name,roundId)});
@@ -1245,12 +1258,98 @@ function v2VerifyQuiz(p) {
   p.quizDataJson=JSON.stringify(actual);
   p.userAnswersJson=JSON.stringify(answers.map((a,i)=>({...a,isBonus:actual[i].isBonus})));
 }
+
+const QUIZ_RECEIPTS_SHEET='考卷收件備份';
+function quizReceipts_() {
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sh=ss.getSheetByName(QUIZ_RECEIPTS_SHEET);
+  if(!sh) {
+    sh=ss.insertSheet(QUIZ_RECEIPTS_SHEET);
+    sh.appendRow(['收件時間','提交編號','梯次編號','組別','姓名','科目','分數','狀態','完整提交資料','完成時間','錯誤訊息']);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function quizReceiptById_(id) {
+  const sh=quizReceipts_(),last=sh.getLastRow();
+  if(last<2)return null;
+  const rows=sh.getRange(2,1,last-1,11).getValues();
+  const i=rows.findIndex(r=>String(r[1])===String(id));
+  return i<0?null:{sh,row:i+2,data:rows[i]};
+}
+function quizReceiptByPerson_(group,name,roundId) {
+  const sh=quizReceipts_(),last=sh.getLastRow();
+  if(last<2)return null;
+  const rows=sh.getRange(2,1,last-1,8).getValues();
+  const i=rows.findIndex(r=>String(r[2])===roundId&&String(r[3])===group&&String(r[4])===name);
+  return i<0?null:{sh,row:i+2,data:rows[i]};
+}
+function quizReceiptStatus_(record) {
+  return {success:true,received:true,submissionId:String(record.data[1]),score:Number(record.data[6]),status:String(record.data[7])};
+}
+function quizReceive_(p,user) {
+  if(String(p.group)!==user.group||String(p.name)!==user.name)throw Error('只能提交自己的考卷');
+  const id=String(p.submissionId||'');
+  if(!/^[a-zA-Z0-9_-]{8,128}$/.test(id))throw Error('提交編號無效');
+  const existing=quizReceiptById_(id);
+  if(existing) {
+    if(String(existing.data[3])!==user.group||String(existing.data[4])!==user.name)throw Error('無權存取此提交');
+    return quizReceiptStatus_(existing);
+  }
+  if(String(p.roundId||'')!==v4QuizRound())throw Error('測驗梯次已變更');
+  if(!v4QuizWindow(handleGetConfig()))throw Error('測驗已關閉');
+  if(quizReceiptByPerson_(user.group,user.name,String(p.roundId))||v4QuizSubmitted(user.group,user.name,String(p.roundId)))
+    throw Error('本梯次已經提交過考卷');
+  v2VerifyQuiz(p);
+  const score=quizGrade_(p).score;
+  const sh=quizReceipts_();
+  sh.appendRow([new Date(),id,p.roundId,user.group,user.name,p.quizType,score,'待寫入',JSON.stringify(p),'','']);
+  SpreadsheetApp.flush();
+  const record=quizReceiptById_(id);
+  // Receipt is durable before official result write; failure must not erase it.
+  quizFinalize_(record);
+  return quizReceiptStatus_(quizReceiptById_(id));
+}
+function quizFinalize_(record) {
+  if(!record)throw Error('找不到考卷備份');
+  if(String(record.data[7])==='已完成')return;
+  const p=JSON.parse(String(record.data[8]));
+  try {
+    if(!v4QuizSubmitted(p.group,p.name,String(p.roundId))) {
+      const result=handleSubmitQuiz(p,true);
+      if(result.status!=='success')throw Error(result.error||'成績寫入失敗');
+    }
+    record.sh.getRange(record.row,8).setValue('已完成');
+    record.sh.getRange(record.row,10).setValue(new Date());
+    record.sh.getRange(record.row,11).clearContent();
+  } catch(err) {
+    record.sh.getRange(record.row,8).setValue('待補寫');
+    record.sh.getRange(record.row,11).setValue(String(err.message||err));
+  }
+}
+function quizRepairPending() {
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(1000))return;
+  try {
+    const sh=quizReceipts_(),last=sh.getLastRow();
+    if(last<2)return;
+    const rows=sh.getRange(2,1,last-1,8).getValues();
+    let n=0;
+    for(let i=0;i<rows.length&&n<10;i++) {
+      if(!['待寫入','待補寫'].includes(String(rows[i][7])))continue;
+      quizFinalize_({sh,row:i+2,data:sh.getRange(i+2,1,1,11).getValues()[0]});
+      n++;
+    }
+  } finally {lock.releaseLock();}
+}
+
 function v2Post(e) {
   try {
     const p=JSON.parse(e.postData.contents||'{}'),action=String(p.action||'');
     if(action==='login') return JSONResponse(v2Login(p));
     if(action==='register') return JSONResponse(v2Register(p));
     const user=v2Session(p.token);
+    if(action==='receiveQuiz') return JSONResponse(v2WithLock(()=>quizReceive_(p,user)));
     if(action==='adminSyncABImport') {v2Require(user,['admin']);return JSONResponse(v3SyncImportAB());}
     if(['adminCreateUser','adminUpdateUser','adminResetUserPassword'].includes(action)) return JSONResponse(v3AdminUserMutation(p,user));
     const admin=['admin'],staff=['admin','teacher'],lead=['admin','teacher','leader'];
