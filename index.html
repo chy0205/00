@@ -3129,7 +3129,9 @@
                 const controller=new AbortController();
                 timeoutId=setTimeout(()=>controller.abort(),45000);
                 // Check if an earlier timed-out request already reached the server.
-                const prior=await quizCheckReceipt(payload);
+                let prior={received:false};
+                try { prior=await quizCheckReceipt(payload); }
+                catch(checkError) { console.warn('收件狀態查詢失敗，將以相同提交編號重試',checkError); }
                 const res=prior.received?null:await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
                 if(res&&!res.ok)throw Error('伺服器連線失敗（HTTP '+res.status+'）');
                 const result=prior.received?prior:await res.json();
