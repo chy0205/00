@@ -1190,7 +1190,7 @@ function v2Get(e) {
     }
     if(action==='getQuizStatus') {
       const roundId=v4QuizRound();
-      return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:v4QuizSubmitted(session.group,session.name,roundId)});
+      return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:!!quizReceiptByPerson_(session.group,session.name,roundId)||v4QuizSubmitted(session.group,session.name,roundId)});
     }
     if(action==='getQuizQuestions') {
       v2Require(session,['admin','teacher','leader','student','publisher']);
@@ -1306,9 +1306,8 @@ function quizReceive_(p,user) {
   sh.appendRow([new Date(),id,p.roundId,user.group,user.name,p.quizType,score,'待寫入',JSON.stringify(p),'','']);
   SpreadsheetApp.flush();
   const record=quizReceiptById_(id);
-  // Receipt is durable before official result write; failure must not erase it.
-  quizFinalize_(record);
-  return quizReceiptStatus_(quizReceiptById_(id));
+  // Durable receipt confirmed. Official write is handled by the scheduled repair job.
+  return quizReceiptStatus_(record);
 }
 function quizFinalize_(record) {
   if(!record)throw Error('找不到考卷備份');
@@ -1326,6 +1325,11 @@ function quizFinalize_(record) {
     record.sh.getRange(record.row,8).setValue('待補寫');
     record.sh.getRange(record.row,11).setValue(String(err.message||err));
   }
+}
+function quizInstallRepairTrigger() {
+  const fn='quizRepairPending';
+  if(!ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()===fn))
+    ScriptApp.newTrigger(fn).timeBased().everyMinutes(1).create();
 }
 function quizRepairPending() {
   const lock=LockService.getScriptLock();
@@ -1350,6 +1354,7 @@ function v2Post(e) {
     if(action==='register') return JSONResponse(v2Register(p));
     const user=v2Session(p.token);
     if(action==='receiveQuiz') return JSONResponse(v2WithLock(()=>quizReceive_(p,user)));
+    if(action==='retryQuizReceipt') return JSONResponse(v2WithLock(()=>quizReceive_(p,user)));
     if(action==='adminSyncABImport') {v2Require(user,['admin']);return JSONResponse(v3SyncImportAB());}
     if(['adminCreateUser','adminUpdateUser','adminResetUserPassword'].includes(action)) return JSONResponse(v3AdminUserMutation(p,user));
     const admin=['admin'],staff=['admin','teacher'],lead=['admin','teacher','leader'];
