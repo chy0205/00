@@ -1131,6 +1131,10 @@ function v2Get(e) {
     if(action==='adminListUsers') return JSONResponse(v3AdminUsersList(session));
     if(action==='adminPreviewABImport') return JSONResponse(v3AdminImportPreview(session));
     if(action==='validateSession') return JSONResponse({success:true,name:session.name,group:session.group,role:session.role});
+    if(action==='getQuizQuestions') {
+      v2Require(session,['admin','teacher','leader','student','publisher']);
+      return JSONResponse({success:true,data:v2QuizQuestions(String(p.quizType||''))});
+    }
     if(action==='getAttendanceReport') {v2Require(session,['admin','teacher','leader']); p.role=session.role;p.group=session.group;}
     if(action==='getHomeworkReport') {
       v2Require(session,['admin','teacher','leader']);
@@ -1169,7 +1173,7 @@ function v2QuizQuestions(type) {
       const question=(cells[offset]||'').trim();
       if(!question || question==='題目') return null;
       const split=x=>String(x||'').split(/[,，\n;]+/).map(v=>v.trim()).filter(Boolean);
-      return {question,answer:split(cells[offset+3]),score:parseFloat(cells[offset+4])||0,
+      return {question,type:(cells[offset+1]||'single').toLowerCase().trim(),options:split(cells[offset+2]),answer:split(cells[offset+3]),score:parseFloat(cells[offset+4])||0,
         photo:(cells[offset+5]||'').trim(),isBonus:['是','yes','true','y','1'].includes((cells[offset+6]||'').toLowerCase().trim())};
     }).filter(Boolean);
   }
