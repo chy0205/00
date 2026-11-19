@@ -3001,8 +3001,9 @@
                 const status = await statusRes.json();
                 if (!status.success) throw new Error(status.error || '無法確認測驗梯次');
                 if (!status.open) throw new Error('測驗目前未開放');
-                if (status.submitted) throw new Error('本梯次已提交過考卷，請等待下次重新開放');
                 activeQuizRoundId = status.roundId;
+                if(await quizRecoverPending(status.roundId))return;
+                if (status.submitted) throw new Error('本梯次已提交過考卷，請等待下次重新開放');
             } catch (err) { toast('無法開始測驗：' + (err.message || String(err)), true); return; }
             document.getElementById('quiz-init').classList.add('hidden'); document.getElementById('quiz-main').classList.remove('hidden');
             try {
@@ -3064,7 +3065,35 @@
             h += `<button onclick="handleQuizSubmit()" id="quiz-final-btn" class="w-full py-5 btn-primary rounded-3xl font-black text-xl shadow-2xl mt-10">提交考卷</button>`;
             content.innerHTML = h; window.scrollTo(0, 0);
         }
-        async async function handleQuizSubmit() {
+        function quizPendingKey(roundId) {
+            return 'quiz_pending_'+[roundId,currentUser.group,currentUser.name].map(encodeURIComponent).join('_');
+        }
+        async function quizCheckReceipt(payload) {
+            const url=APPS_SCRIPT_URL+'?action=getQuizReceipt&submissionId='+encodeURIComponent(payload.submissionId);
+            const response=await fetch(url);
+            if(!response.ok)throw Error('無法查詢收件狀態');
+            const data=await response.json();
+            if(!data.success)throw Error(data.error||'無法查詢收件狀態');
+            return data;
+        }
+        async function quizRecoverPending(roundId) {
+            const key=quizPendingKey(roundId);
+            const saved=localStorage.getItem(key);
+            if(!saved)return false;
+            const payload=JSON.parse(saved);
+            let result=await quizCheckReceipt(payload);
+            if(!result.received) {
+                const res=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
+                if(!res.ok)throw Error('待送考卷尚未成功傳送');
+                result=await res.json();
+                if(!result.success||!result.received)throw Error(result.error||'待送考卷尚未成功傳送');
+            }
+            localStorage.removeItem(key);
+            toast('已恢復先前交卷，成績 '+result.score+' 分'+(result.status==='已完成'?'':'（正式成績待補寫）'));
+            switchView('results');
+            return true;
+        }
+        async function handleQuizSubmit() {
             const btn = document.getElementById('quiz-final-btn');
             if (!btn || btn.disabled) return;
             btn.disabled = true;
@@ -3086,7 +3115,7 @@
                     else val = Array.from(document.querySelectorAll(`input[name="q${i + 1}"]:checked`)).map(el => el.value).sort().join(', ') || '未作答';
                     return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
                 });
-                const key='quiz_pending_'+[activeQuizRoundId,currentUser.group,currentUser.name].map(encodeURIComponent).join('_');
+                const key=quizPendingKey(activeQuizRoundId);
                 let payload;
                 const saved=localStorage.getItem(key);
                 if(saved) payload=JSON.parse(saved);
@@ -3099,12 +3128,15 @@
                 }
                 const controller=new AbortController();
                 timeoutId=setTimeout(()=>controller.abort(),45000);
-                const res=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
-                if(!res.ok)throw Error('伺服器連線失敗（HTTP '+res.status+'）');
-                const result=await res.json();
+                // Check if an earlier timed-out request already reached the server.
+                const prior=await quizCheckReceipt(payload);
+                const res=prior.received?null:await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
+                if(res&&!res.ok)throw Error('伺服器連線失敗（HTTP '+res.status+'）');
+                const result=prior.received?prior:await res.json();
                 if(!result.success||!result.received)throw Error(result.error||'伺服器尚未確認收件');
                 localStorage.removeItem(key);
-                toast('考卷已收件，本次成績 '+result.score+' 分'+(result.status==='已完成'?'':'；正式成績正在補寫'));
+                toast('考卷已收件，本次成績 '+result.score+' 分'+(result.status==='已完成'?'':'；正式成績待補寫'));
+                sessionStorage.setItem('quiz_last_score',String(result.score));
                 switchView('results');
             } catch (e) {
                 console.error('考卷提交失敗：', e);
