@@ -1271,7 +1271,7 @@
         const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
         let currentUser = null, teamsData = {}, historyData = [], cachedAnnouncements = [], cachedSignedUsers = [], proxyTarget = null, bonusTarget = null;
-        let currentQuizOpenStatus = false, quizData = [], activeRowForUpload = null;
+        let currentQuizOpenStatus = false, quizData = [], activeRowForUpload = null, activeQuizRoundId = null;
         let checkinZones = [], cachedHomeworkConfig = [], cachedHomeworkSubmissions = [], hwHistoryData = [];
         let uploadedUrls = [];
 
@@ -2996,6 +2996,14 @@
         async function startQuizFlow() {
             if (!currentQuizOpenStatus) return toast('非開放時段', true);
             const type = document.getElementById('quiz-type-select')?.value; if (!type) return toast('請選科目', true);
+            try {
+                const statusRes = await fetch(`${APPS_SCRIPT_URL}?action=getQuizStatus`);
+                const status = await statusRes.json();
+                if (!status.success) throw new Error(status.error || '無法確認測驗梯次');
+                if (!status.open) throw new Error('測驗目前未開放');
+                if (status.submitted) throw new Error('本梯次已提交過考卷，請等待下次重新開放');
+                activeQuizRoundId = status.roundId;
+            } catch (err) { toast('無法開始測驗：' + (err.message || String(err)), true); return; }
             document.getElementById('quiz-init').classList.add('hidden'); document.getElementById('quiz-main').classList.remove('hidden');
             try {
                 const res = await fetch(`${APPS_SCRIPT_URL}?action=getQuizQuestions&quizType=${encodeURIComponent(type)}`);
@@ -3084,7 +3092,7 @@
                     method: 'POST',
                     body: JSON.stringify({
                         action: 'submitQuiz', group: currentUser.group, name: currentUser.name,
-                        quizType, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData)
+                        quizType, roundId: activeQuizRoundId, userAnswersJson: JSON.stringify(answers), quizDataJson: JSON.stringify(quizData)
                     }),
                     signal: controller.signal
                 });
