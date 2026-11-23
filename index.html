@@ -578,6 +578,36 @@
             .btn-primary,.v3-quick-card,.nav-item { transition:none!important; }
         }
 
+    
+        /* 一頁一題測驗介面：僅前端切換，保留原有後端交卷流程 */
+        .quiz-pager-shell{max-width:800px;margin:auto;padding:clamp(14px,3vw,26px);border:1px solid #e3ecea;border-radius:30px;background:#fff;box-shadow:0 14px 36px rgba(65,93,98,.07)}
+        .quiz-pager-top,.quiz-progress-tools,.quiz-page-meta,.quiz-page-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}
+        .quiz-pager-top strong{display:block;font-size:19px;color:#2e7469}.quiz-pager-top small{display:block;color:#78908c;font-size:12px;margin-top:4px}
+        #quiz-page-count{background:#e4f6ee;color:#237d6d;border-radius:99px;padding:7px 12px;font-size:12px;font-weight:800;white-space:nowrap}
+        .quiz-progress-track{height:9px;background:#edf2f1;border-radius:99px;overflow:hidden;margin:20px 0 10px}
+        #quiz-progress-bar{height:100%;width:0;background:#65bfa7;border-radius:99px;transition:width .2s}
+        .quiz-progress-tools{font-size:12px;color:#6c817f}.quiz-progress-tools button{border:1px solid #e0e8e5;border-radius:13px;padding:8px 12px;color:#267d6c;font-weight:700}
+        .quiz-overview{display:grid;grid-template-columns:repeat(auto-fill,minmax(45px,1fr));gap:9px;margin:16px 0}
+        .quiz-overview button{min-height:44px;border:1px solid #e1e8e7;border-radius:13px;background:#f8faf9;font-weight:800;color:#6d8080}
+        .quiz-overview button.answered{background:#dff6ea;color:#1e826e;border-color:#b5e5d4}
+        .quiz-overview button.current{outline:2px solid #4aaa93;outline-offset:1px}
+        .quiz-page-card{background:#fbfcff;border:1px solid #edf0f4;border-radius:24px;padding:clamp(20px,4vw,32px);margin:20px 0}
+        .quiz-page-card.hidden,.quiz-review-panel.hidden,.quiz-overview.hidden,#quiz-question-panel.hidden{display:none!important}
+        .quiz-page-meta{font-size:12px;font-weight:800;color:#7b8c9d;margin-bottom:18px}
+        .quiz-page-meta span:first-child{color:#2c9c83;background:#e6f7ef;padding:6px 10px;border-radius:99px}
+        .quiz-page-card h3{font-size:clamp(18px,3vw,23px);font-weight:900;color:#34475c;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+        .quiz-page-options{display:grid;gap:11px;margin-top:22px}
+        .quiz-answer-option{display:flex;gap:14px;align-items:center;border:1px solid #e1e7ee;border-radius:18px;padding:15px 16px;background:white;cursor:pointer;font-weight:700;color:#47586b;line-height:1.5}
+        .quiz-answer-option:hover,.quiz-answer-option:has(input:checked){background:#effbf4;border-color:#90d4be}
+        .quiz-answer-option input{accent-color:#2a9a83;flex:none;width:19px;height:19px}
+        .quiz-page-actions button{min-height:51px;border-radius:17px;padding:12px 18px;flex:1;font-weight:800;border:1px solid #e1e7e9}
+        .quiz-page-actions button:disabled{opacity:.4;cursor:not-allowed}
+        .quiz-early-submit{display:block;margin:15px auto 0;color:#7b8b95;font-weight:700;padding:8px}
+        .quiz-review-panel{text-align:center;padding:30px 12px}.quiz-review-icon{margin:auto auto 15px;background:#e1f6ea;color:#278c76;border-radius:50%;width:64px;height:64px;display:grid;place-items:center;font-size:30px}
+        .quiz-review-panel h3{font-size:23px;font-weight:900;color:#33465c}.quiz-review-panel p{color:#687b8b;margin:12px 0}
+        .quiz-review-panel button{display:block;width:100%;padding:15px;border:1px solid #e2e8e9;border-radius:17px;margin-top:12px;font-weight:800}
+        @media(max-width:480px){.quiz-pager-shell{padding:15px;border-radius:23px}.quiz-page-card{padding:18px 15px}.quiz-page-actions button{padding:12px 8px}}
+
     </style>
 </head>
 
@@ -3209,49 +3239,143 @@
                 document.getElementById('quiz-main').classList.add('hidden');
             }
         }
-        function renderQuiz() {
-            const content = document.getElementById('quiz-content'); if (!content) return;
-            let h = `<div class="bg-emerald-50 p-4 rounded-2xl mb-6 text-emerald-800 text-xs font-black text-center border">正式測驗中</div>`;
-
-            if (!quizData || quizData.length === 0) {
-                h += `<div class="p-20 text-center text-slate-400 font-bold italic bg-white rounded-3xl border">目前無題目資料，請聯繫管理員確認或稍後再試。</div>`;
-            } else {
-                quizData.forEach((q, i) => {
-                    const qId = `q${i + 1}`;
-                    const photo = (q.photo || "").toString();
-                    let imgHtml = (photo && (photo.includes('http') || (photo.length > 20 && !photo.includes(' ')))) ? `<img src="${convertToDirectLink(photo)}" class="quiz-image" onerror="this.style.display='none'">` : "";
-
-                    // Normalizing type
-                    const qType = (q.type || 'single').toString().toLowerCase();
-                    const isFill = q.isBonus === true || qType === 'fill' || qType === 'text' || qType === '填充' || qType === '填空';
-                    const isSingle = qType === 'single' || qType === 'radio' || qType === '單選' || qType === '單選題';
-
-                    let opts = "";
-                    if (isFill) {
-                        opts = `<input type="text" class="w-full p-4 bg-slate-50 border rounded-2xl" id="${qId}-input" placeholder="在此輸入回答...">`;
-                    } else {
-                        // Shuffling options
-                        const optionsList = Array.isArray(q.options) ? q.options : [];
-                        let shuffledOptions = [...optionsList].sort(() => Math.random() - 0.5);
-                        opts = shuffledOptions.map(o => `
-                            <label class="border p-4 rounded-2xl flex items-center mb-2 cursor-pointer hover:bg-slate-50 transition-colors">
-                                <input type="${isSingle ? 'radio' : 'checkbox'}" name="${qId}" value="${o}" class="mr-4 w-6 h-6">
-                                <span class="font-bold text-slate-700">${o}</span>
-                            </label>
-                        `).join('');
-                    }
-
-                    h += `
-                    <div class="${q.isBonus ? 'bonus-card' : 'question-card'} p-6 rounded-3xl shadow-sm mb-6 bg-white border">
-                        <div class="text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">Q${i + 1}</div>
-                        <h3 class="font-black text-lg mb-2 text-slate-800">${q.question}</h3>
-                        ${imgHtml}
-                        <div class="mt-4">${opts}</div>
-                    </div>`;
+        let quizCurrentIndex=0;
+        function quizDraftKey() {
+            return 'quiz_draft_'+[activeQuizRoundId,currentUser.group,currentUser.name,
+                document.getElementById('quiz-type-select')?.value||''].map(encodeURIComponent).join('_');
+        }
+        function quizAnswerValue(i) {
+            const q=quizData[i],type=String(q.type||'single').toLowerCase();
+            const fill=q.isBonus||['fill','text','填充','填空','默寫','默寫題'].includes(type);
+            const single=['single','radio','單選','單選題'].includes(type);
+            if(fill)return document.getElementById('q'+(i+1)+'-input')?.value.trim()||'未作答';
+            if(single)return document.querySelector('input[name="q'+(i+1)+'"]:checked')?.value||'未作答';
+            return Array.from(document.querySelectorAll('input[name="q'+(i+1)+'"]:checked')).map(el=>el.value).sort().join(', ')||'未作答';
+        }
+        function quizSaveDraft() {
+            if(!quizData.length||!currentUser||!activeQuizRoundId)return;
+            try {
+                const answers=quizData.map((q,i)=>quizAnswerValue(i));
+                localStorage.setItem(quizDraftKey(),JSON.stringify({answers,questions:quizData.map(q=>String(q.question||''))}));
+            }catch(err){console.warn('考卷暫存失敗',err);}
+            quizUpdateProgress();
+        }
+        function quizRestoreDraft() {
+            try {
+                const draft=JSON.parse(localStorage.getItem(quizDraftKey())||'null');
+                if(!draft||!Array.isArray(draft.answers)||!Array.isArray(draft.questions))return;
+                if(draft.questions.length!==quizData.length||draft.questions.some((q,i)=>q!==String(quizData[i].question||'')))return;
+                draft.answers.forEach((answer,i)=>{
+                    if(!answer||answer==='未作答')return;
+                    const field=document.getElementById('q'+(i+1)+'-input');
+                    if(field){field.value=answer;return;}
+                    const chosen=String(answer).split(', ').map(v=>v.trim());
+                    document.querySelectorAll('input[name="q'+(i+1)+'"]').forEach(input=>{
+                        input.checked=chosen.includes(input.value);
+                    });
                 });
+            }catch(err){console.warn('考卷暫存讀取失敗',err);}
+        }
+        function quizUpdateProgress() {
+            if(!quizData.length)return;
+            const done=quizData.filter((_,i)=>quizAnswerValue(i)!=='未作答').length;
+            const count=document.getElementById('quiz-progress-count');
+            if(count)count.textContent='已作答 '+done+' / '+quizData.length+' 題';
+            const bar=document.getElementById('quiz-progress-bar');
+            if(bar)bar.style.width=(100*done/quizData.length)+'%';
+            document.querySelectorAll('[data-quiz-jump]').forEach(button=>{
+                const i=Number(button.dataset.quizJump);
+                button.classList.toggle('answered',quizAnswerValue(i)!=='未作答');
+                button.classList.toggle('current',i===quizCurrentIndex);
+                button.setAttribute('aria-current',i===quizCurrentIndex?'step':'false');
+            });
+        }
+        function quizGoTo(index) {
+            if(index<0||index>=quizData.length)return;
+            quizCurrentIndex=index;
+            document.querySelectorAll('[data-quiz-question]').forEach((el,i)=>el.classList.toggle('hidden',i!==index));
+            const num=document.getElementById('quiz-page-count');
+            if(num)num.textContent='第 '+(index+1)+' / '+quizData.length+' 題';
+            const prev=document.getElementById('quiz-prev-btn');
+            if(prev)prev.disabled=index===0;
+            const next=document.getElementById('quiz-next-btn');
+            if(next)next.textContent=index===quizData.length-1?'檢查並交卷':'下一題 →';
+            document.getElementById('quiz-review-panel')?.classList.add('hidden');
+            document.getElementById('quiz-question-panel')?.classList.remove('hidden');
+            quizUpdateProgress();
+            document.getElementById('quiz-content')?.scrollIntoView({behavior:'smooth',block:'start'});
+        }
+        function quizToggleOverview() {
+            document.getElementById('quiz-overview')?.classList.toggle('hidden');
+        }
+        function quizReview() {
+            quizSaveDraft();
+            const done=quizData.filter((_,i)=>quizAnswerValue(i)!=='未作答').length;
+            const summary=document.getElementById('quiz-review-summary');
+            if(summary)summary.textContent='已作答 '+done+' 題，未作答 '+(quizData.length-done)+' 題';
+            document.getElementById('quiz-question-panel')?.classList.add('hidden');
+            document.getElementById('quiz-review-panel')?.classList.remove('hidden');
+            document.getElementById('quiz-review-panel')?.scrollIntoView({behavior:'smooth',block:'center'});
+        }
+        function quizEscape(value) {
+            return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function renderQuiz() {
+            const content=document.getElementById('quiz-content');
+            if(!content)return;
+            if(!quizData||!quizData.length) {
+                content.innerHTML='<div class="p-10 text-center bg-white rounded-3xl">目前無題目資料，請聯繫管理員。</div>';
+                return;
             }
-            h += `<button onclick="handleQuizSubmit()" id="quiz-final-btn" class="w-full py-5 btn-primary rounded-3xl font-black text-xl shadow-2xl mt-10">提交考卷</button>`;
-            content.innerHTML = h; window.scrollTo(0, 0);
+            quizCurrentIndex=0;
+            let h=`<div class="quiz-pager-shell">
+                <div class="quiz-pager-top"><div><strong>✏️ 隨堂測驗</strong><small>一次載入全部題目，切換不需重新連線</small></div><span id="quiz-page-count">第 1 / ${quizData.length} 題</span></div>
+                <div class="quiz-progress-track"><div id="quiz-progress-bar"></div></div>
+                <div class="quiz-progress-tools"><span id="quiz-progress-count">已作答 0 / ${quizData.length} 題</span><button type="button" onclick="quizToggleOverview()">▦ 題目導覽</button></div>
+                <div id="quiz-overview" class="quiz-overview hidden">${quizData.map((_,i)=>`<button type="button" data-quiz-jump="${i}" onclick="quizGoTo(${i})">${i+1}</button>`).join('')}</div>
+                <div id="quiz-question-panel">`;
+            quizData.forEach((q,i)=>{
+                const qId='q'+(i+1);
+                const photo=String(q.photo||'');
+                const imgHtml=photo&&(photo.includes('http')||(photo.length>20&&!photo.includes(' ')))?
+                    `<img src="${quizEscape(convertToDirectLink(photo))}" class="quiz-image" alt="題目圖片" onerror="this.style.display='none'">`:'';
+                const type=String(q.type||'single').toLowerCase();
+                const fill=q.isBonus===true||['fill','text','填充','填空','默寫','默寫題'].includes(type);
+                const single=['single','radio','單選','單選題'].includes(type);
+                const isWriting=['默寫','默寫題'].includes(type);
+                let opts='';
+                if(fill) {
+                    opts=isWriting?
+                        `<textarea id="${qId}-input" rows="5" class="w-full p-4 bg-slate-50 border rounded-2xl" placeholder="請在這裡默寫內容"></textarea>`:
+                        `<input type="text" id="${qId}-input" class="w-full p-4 bg-slate-50 border rounded-2xl" placeholder="請輸入答案">`;
+                }else {
+                    const options=Array.isArray(q.options)?[...q.options]:[];
+                    for(let j=options.length-1;j>0;j--){const k=Math.floor(Math.random()*(j+1));[options[j],options[k]]=[options[k],options[j]];}
+                    opts=options.map((o,j)=>`<label class="quiz-answer-option">
+                        <input type="${single?'radio':'checkbox'}" name="${qId}" value="${quizEscape(o)}">
+                        <span>${String.fromCharCode(65+j)}. ${quizEscape(o)}</span>
+                    </label>`).join('');
+                }
+                h+=`<article data-quiz-question class="quiz-page-card ${i?'hidden':''}">
+                    <div class="quiz-page-meta"><span>${q.isBonus?'填充題':fill?(isWriting?'默寫題':'填充題'):(single?'單選題':'複選題')}</span><span>第 ${i+1} 題</span></div>
+                    <h3>${quizEscape(q.question)}</h3>${imgHtml}<div class="quiz-page-options">${opts}</div>
+                </article>`;
+            });
+            h+=`<div class="quiz-page-actions"><button type="button" id="quiz-prev-btn" onclick="quizGoTo(quizCurrentIndex-1)" disabled>← 上一題</button>
+                <button type="button" id="quiz-next-btn" class="btn-primary" onclick="quizCurrentIndex===quizData.length-1?quizReview():quizGoTo(quizCurrentIndex+1)">下一題 →</button></div>
+                <button type="button" class="quiz-early-submit" onclick="quizReview()">提前交卷</button></div>
+                <div id="quiz-review-panel" class="quiz-review-panel hidden">
+                    <div class="quiz-review-icon">✓</div><h3>交卷前確認</h3>
+                    <p id="quiz-review-summary"></p><p>請確認所有答案，提交後本梯次不可重複交卷。</p>
+                    <button type="button" onclick="quizGoTo(quizCurrentIndex)">返回檢查答案</button>
+                    <button type="button" onclick="handleQuizSubmit()" id="quiz-final-btn" class="btn-primary">確認提交考卷</button>
+                </div></div>`;
+            content.innerHTML=h;
+            content.addEventListener('input',quizSaveDraft);
+            content.addEventListener('change',quizSaveDraft);
+            quizRestoreDraft();
+            quizUpdateProgress();
+            window.scrollTo(0,0);
         }
         function quizPendingKey(roundId) {
             return 'quiz_pending_'+[roundId,currentUser.group,currentUser.name].map(encodeURIComponent).join('_');
@@ -3293,16 +3417,9 @@
                 if (!Array.isArray(quizData) || !quizData.length) throw new Error('考卷沒有題目，請重新載入');
                 const quizType = document.getElementById('quiz-type-select')?.value;
                 if (!quizType) throw new Error('請先選擇測驗科目');
-                const answers = quizData.map((q, i) => {
-                    let val = '未作答';
-                    const qType = String(q.type || 'single').toLowerCase();
-                    const isFill = q.isBonus || ['fill','text','填充','填空'].includes(qType);
-                    const isSingle = ['single','radio','單選','單選題'].includes(qType);
-                    if (isFill) val = document.getElementById(`q${i + 1}-input`)?.value.trim() || '未作答';
-                    else if (isSingle) val = document.querySelector(`input[name="q${i + 1}"]:checked`)?.value || '未作答';
-                    else val = Array.from(document.querySelectorAll(`input[name="q${i + 1}"]:checked`)).map(el => el.value).sort().join(', ') || '未作答';
-                    return { userAnswer: val, isBonus: q.isBonus, photo: q.photo, question: q.question };
-                });
+                const answers = quizData.map((q,i)=>({
+                    userAnswer:quizAnswerValue(i),isBonus:q.isBonus,photo:q.photo,question:q.question
+                }));
                 const key=quizPendingKey(activeQuizRoundId);
                 let payload;
                 const saved=localStorage.getItem(key);
@@ -3325,6 +3442,7 @@
                 const result=prior.received?prior:await res.json();
                 if(!result.success||!result.received)throw Error(result.error||'伺服器尚未確認收件');
                 localStorage.removeItem(key);
+                localStorage.removeItem(quizDraftKey());
                 toast('考卷已收件，本次成績 '+result.score+' 分'+(result.status==='已完成'?'':'；正式成績待補寫'));
                 sessionStorage.setItem('quiz_last_score',String(result.score));
                 switchView('results');
