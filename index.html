@@ -1677,6 +1677,7 @@
         }
 
         function switchView(viewName) {
+            if(quizSubmitting && viewName!=='quiz' && quizLocked){toast('考卷提交中，請稍候',true);return;}
             document.querySelectorAll('section').forEach(v => v.classList.add('hidden-view'));
             const target = document.getElementById(`view-${viewName}`);
             if (target) target.classList.remove('hidden-view');
@@ -3212,6 +3213,7 @@
         }
 
         async function startQuizFlow() {
+            if(quizSubmitting)return toast('考卷提交中，請稍候',true);
             if (!currentQuizOpenStatus) return toast('非開放時段', true);
             const type = document.getElementById('quiz-type-select')?.value; if (!type) return toast('請選科目', true);
             try {
@@ -3231,6 +3233,7 @@
                 if (!result.success || !Array.isArray(result.data) || !result.data.length)
                     throw new Error(result.error || '題庫沒有可用題目');
                 quizData = result.data;
+                quizLocked=false;
                 renderQuiz();
             } catch (e) {
                 console.error('考卷載入失敗：', e);
@@ -3239,7 +3242,20 @@
                 document.getElementById('quiz-main').classList.add('hidden');
             }
         }
-        let quizCurrentIndex=0;
+        let quizCurrentIndex=0, quizLocked=false, quizSubmitting=false;
+        function quizResetAfterReceipt() {
+            quizData=[]; quizCurrentIndex=0; quizLocked=false;
+            const content=document.getElementById('quiz-content'); if(content)content.innerHTML='';
+            document.getElementById('quiz-main')?.classList.add('hidden');
+            document.getElementById('quiz-init')?.classList.remove('hidden');
+        }
+        function quizLockAnswers() {
+            quizLocked=true;
+            document.getElementById('quiz-overview')?.classList.add('hidden');
+            document.getElementById('quiz-question-panel')?.classList.add('hidden');
+            document.getElementById('quiz-review-panel')?.classList.remove('hidden');
+            document.querySelectorAll('#quiz-content input,#quiz-content textarea,#quiz-content button:not(#quiz-final-btn)').forEach(el=>el.disabled=true);
+        }
         function quizDraftKey() {
             return 'quiz_draft_'+[activeQuizRoundId,currentUser.group,currentUser.name,
                 document.getElementById('quiz-type-select')?.value||''].map(encodeURIComponent).join('_');
@@ -3253,6 +3269,7 @@
             return Array.from(document.querySelectorAll('input[name="q'+(i+1)+'"]:checked')).map(el=>el.value).sort().join(', ')||'未作答';
         }
         function quizSaveDraft() {
+            if(quizLocked)return;
             if(!quizData.length||!currentUser||!activeQuizRoundId)return;
             try {
                 const answers=quizData.map((q,i)=>quizAnswerValue(i));
@@ -3291,6 +3308,7 @@
             });
         }
         function quizGoTo(index) {
+            if(quizLocked)return;
             if(index<0||index>=quizData.length)return;
             quizCurrentIndex=index;
             document.querySelectorAll('[data-quiz-question]').forEach((el,i)=>el.classList.toggle('hidden',i!==index));
@@ -3306,9 +3324,11 @@
             document.getElementById('quiz-content')?.scrollIntoView({behavior:'smooth',block:'start'});
         }
         function quizToggleOverview() {
+            if(quizLocked)return;
             document.getElementById('quiz-overview')?.classList.toggle('hidden');
         }
         function quizReview() {
+            if(quizLocked)return;
             quizSaveDraft();
             const done=quizData.filter((_,i)=>quizAnswerValue(i)!=='未作答').length;
             const summary=document.getElementById('quiz-review-summary');
@@ -3402,15 +3422,17 @@
             }
             localStorage.removeItem(key);
             try { localStorage.removeItem('quiz_draft_'+[roundId,currentUser.group,currentUser.name,payload.quizType].map(encodeURIComponent).join('_')); } catch(err) { console.warn(err); }
+            quizResetAfterReceipt();
             toast('已恢復先前交卷，成績 '+result.score+' 分'+(result.status==='已完成'?'':'（正式成績待補寫）'));
             switchView('results');
             return true;
         }
         async function handleQuizSubmit() {
             const btn = document.getElementById('quiz-final-btn');
-            if (!btn || btn.disabled) return;
+            if (!btn || btn.disabled || quizSubmitting) return;
+            quizSubmitting=true;
+            quizLockAnswers();
             btn.disabled = true;
-            const originalText = btn.textContent;
             btn.textContent = '正在提交考卷，請稍候…';
             let timeoutId;
             try {
@@ -3443,7 +3465,8 @@
                 const result=prior.received?prior:await res.json();
                 if(!result.success||!result.received)throw Error(result.error||'伺服器尚未確認收件');
                 localStorage.removeItem(key);
-                localStorage.removeItem(quizDraftKey());
+                try { localStorage.removeItem(quizDraftKey()); } catch(err) { console.warn(err); }
+                quizResetAfterReceipt();
                 toast('考卷已收件，本次成績 '+result.score+' 分'+(result.status==='已完成'?'':'；正式成績待補寫'));
                 sessionStorage.setItem('quiz_last_score',String(result.score));
                 switchView('results');
@@ -3455,8 +3478,13 @@
                 toast('考卷提交異常：' + message, true);
             } finally {
                 if (timeoutId) clearTimeout(timeoutId);
-                btn.disabled = false;
-                btn.textContent = originalText;
+                quizSubmitting=false;
+                if(quizLocked && btn.isConnected){
+                    btn.disabled=false;
+                    btn.textContent='重試提交原考卷';
+                    const summary=document.getElementById('quiz-review-summary');
+                    if(summary)summary.textContent='本次答案已鎖定，請重試提交原考卷。';
+                }
             }
         }
 
