@@ -602,7 +602,7 @@
         .quiz-answer-option input{accent-color:#2a9a83;flex:none;width:19px;height:19px}
         .quiz-page-actions button{min-height:51px;border-radius:17px;padding:12px 18px;flex:1;font-weight:800;border:1px solid #e1e7e9}
         .quiz-page-actions button:disabled{opacity:.4;cursor:not-allowed}
-        .quiz-early-submit{display:block;margin:15px auto 0;color:#7b8b95;font-weight:700;padding:8px}
+        .quiz-early-submit{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:15px auto 0;color:#a65b16;background:#fff1e2;border:1px solid #f5d7b6;border-radius:17px;font-weight:800;padding:14px;min-height:48px}.quiz-early-submit:hover{background:#ffe6cc}.quiz-early-submit svg{width:19px;height:19px;flex:none;display:inline-block}
         .quiz-review-panel{text-align:center;padding:30px 12px}.quiz-review-icon{margin:auto auto 15px;background:#e1f6ea;color:#278c76;border-radius:50%;width:64px;height:64px;display:grid;place-items:center;font-size:30px}
         .quiz-review-panel h3{font-size:23px;font-weight:900;color:#33465c}.quiz-review-panel p{color:#687b8b;margin:12px 0}
         .quiz-review-panel button{display:block;width:100%;padding:15px;border:1px solid #e2e8e9;border-radius:17px;margin-top:12px;font-weight:800}
@@ -3363,7 +3363,7 @@
             });
             h+=`<div class="quiz-page-actions"><button type="button" id="quiz-prev-btn" onclick="quizGoTo(quizCurrentIndex-1)" disabled>← 上一題</button>
                 <button type="button" id="quiz-next-btn" class="btn-primary" onclick="quizCurrentIndex===quizData.length-1?quizReview():quizGoTo(quizCurrentIndex+1)">下一題 →</button></div>
-                <button type="button" class="quiz-early-submit" onclick="quizReview()">提前交卷</button></div>
+                <button type="button" class="quiz-early-submit" onclick="quizReview()"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h3a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3M9 14l2 2 4-4"/></svg><span>提前交卷</span></button></div>
                 <div id="quiz-review-panel" class="quiz-review-panel hidden">
                     <div class="quiz-review-icon">✓</div><h3>交卷前確認</h3>
                     <p id="quiz-review-summary"></p><p>請確認所有答案，提交後本梯次不可重複交卷。</p>
