@@ -3221,7 +3221,7 @@
                 if (!status.open) throw new Error('測驗目前未開放');
                 activeQuizRoundId = status.roundId;
                 if(await quizRecoverPending(status.roundId))return;
-                if (status.submitted) throw new Error('本梯次已提交過考卷，請等待下次重新開放');
+
             } catch (err) { toast('無法開始測驗：' + (err.message || String(err)), true); return; }
             document.getElementById('quiz-init').classList.add('hidden'); document.getElementById('quiz-main').classList.remove('hidden');
             try {
@@ -3366,7 +3366,7 @@
                 <button type="button" class="quiz-early-submit" onclick="quizReview()"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h3a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3M9 14l2 2 4-4"/></svg><span>提前交卷</span></button></div>
                 <div id="quiz-review-panel" class="quiz-review-panel hidden">
                     <div class="quiz-review-icon">✓</div><h3>交卷前確認</h3>
-                    <p id="quiz-review-summary"></p><p>請確認所有答案，提交後本梯次不可重複交卷。</p>
+                    <p id="quiz-review-summary"></p><p>請確認所有答案，交卷後將保留本次成績；開放期間可重新測驗。</p>
                     <button type="button" onclick="quizGoTo(quizCurrentIndex)">返回檢查答案</button>
                     <button type="button" onclick="handleQuizSubmit()" id="quiz-final-btn" class="btn-primary">確認提交考卷</button>
                 </div></div>`;
@@ -3401,6 +3401,7 @@
                 if(!result.success||!result.received)throw Error(result.error||'待送考卷尚未成功傳送');
             }
             localStorage.removeItem(key);
+            try { localStorage.removeItem('quiz_draft_'+[roundId,currentUser.group,currentUser.name,payload.quizType].map(encodeURIComponent).join('_')); } catch(err) { console.warn(err); }
             toast('已恢復先前交卷，成績 '+result.score+' 分'+(result.status==='已完成'?'':'（正式成績待補寫）'));
             switchView('results');
             return true;
