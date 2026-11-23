@@ -713,11 +713,11 @@ function handleSubmitQuiz(p, trustedReceipt) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheetName = '結果' + monthStr;
   let sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
-  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情', '測驗梯次編號'];
+  let headers = ['時間戳記', '組別', '姓名', '科目', '分數', '詳情', '測驗梯次編號', '提交編號'];
   const roundId=String(p.roundId||'');
   if(!trustedReceipt && (!roundId || roundId!==v4QuizRound())) throw Error('測驗梯次已變更，請重新載入考卷');
   if(!trustedReceipt && !v4QuizWindow(handleGetConfig())) throw Error('測驗已關閉，無法提交');
-  if(v4QuizSubmitted(p.group,p.name,roundId)) throw Error('本梯次已提交考卷，不能重複提交');
+  if(p.submissionId && quizOfficialById_(p.submissionId)) return {status:'success',score:quizGrade_(p).score};
   const {score,details}=quizGrade_(p);
   details.forEach((d, index) => {
     const qPrefix = `[Q${index + 1}]`;
@@ -745,6 +745,7 @@ function handleSubmitQuiz(p, trustedReceipt) {
   rowData[0] = new Date();
   rowData[1] = p.group; rowData[2] = p.name; rowData[3] = p.quizType; rowData[4] = score; rowData[5] = JSON.stringify(details);
   rowData[finalHeaders.indexOf('測驗梯次編號')] = roundId;
+  rowData[finalHeaders.indexOf('提交編號')] = String(p.submissionId||'');
 
   details.forEach((d, index) => {
      const qPrefix = `[Q${index + 1}]`;
@@ -760,15 +761,16 @@ function handleSubmitQuiz(p, trustedReceipt) {
 
 function getHistory(group, name) {
   const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
-  const history=[], officialRounds=new Set();
+  const history=[], officialIds=new Set(), legacyRounds=new Set();
   ss.getSheets().forEach(sh=>{
     if(!sh.getName().startsWith('結果')||sh.getLastRow()<2)return;
     const rows=sh.getDataRange().getValues();
-    const headers=rows[0],roundCol=headers.indexOf('測驗梯次編號');
+    const headers=rows[0],roundCol=headers.indexOf('測驗梯次編號'),idCol=headers.indexOf('提交編號');
     rows.slice(1).forEach(r=>{
       if(!r[0]||String(r[1]).trim()!==String(group).trim()||String(r[2]).trim()!==String(name).trim())return;
       const roundId=roundCol>=0?String(r[roundCol]||''):'';
-      if(roundId)officialRounds.add(roundId);
+      const submissionId=idCol>=0?String(r[idCol]||''):'';
+      if(submissionId)officialIds.add(submissionId);else if(roundId)legacyRounds.add(roundId);
       history.push({
         timestamp:r[0] instanceof Date?Utilities.formatDate(r[0],'GMT+8','yyyy-MM-dd HH:mm'):String(r[0]),
         quizType:r[3],score:r[4],details:r[5],roundId,status:'已完成'
@@ -781,7 +783,8 @@ function getHistory(group, name) {
     rows.forEach(r=>{
       if(String(r[3]).trim()!==String(group).trim()||String(r[4]).trim()!==String(name).trim())return;
       const roundId=String(r[2]||'');
-      if(officialRounds.has(roundId))return;
+      if(officialIds.has(String(r[1])))return;
+      if(String(r[7])==='已完成'&&legacyRounds.has(roundId)){legacyRounds.delete(roundId);return;}
       let details='[]';
       try{
         const p=JSON.parse(String(r[8]||'{}'));
@@ -1214,7 +1217,7 @@ function v2Get(e) {
     }
     if(action==='getQuizStatus') {
       const roundId=v4QuizRound();
-      return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:!!quizReceiptByPerson_(session.group,session.name,roundId)||v4QuizSubmitted(session.group,session.name,roundId)});
+      return JSONResponse({success:true,roundId,open:v4QuizWindow(handleGetConfig()),submitted:false});
     }
     if(action==='getQuizQuestions') {
       v2Require(session,['admin','teacher','leader','student','publisher']);
@@ -1322,8 +1325,6 @@ function quizReceive_(p,user) {
   }
   if(String(p.roundId||'')!==v4QuizRound())throw Error('測驗梯次已變更');
   if(!v4QuizWindow(handleGetConfig()))throw Error('測驗已關閉');
-  if(quizReceiptByPerson_(user.group,user.name,String(p.roundId))||v4QuizSubmitted(user.group,user.name,String(p.roundId)))
-    throw Error('本梯次已經提交過考卷');
   v2VerifyQuiz(p);
   const score=quizGrade_(p).score;
   const sh=quizReceipts_();
@@ -1333,12 +1334,22 @@ function quizReceive_(p,user) {
   // Durable receipt confirmed. Official write is handled by the scheduled repair job.
   return quizReceiptStatus_(record);
 }
+function quizOfficialById_(id) {
+  if(!id)return false;
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  for(const sh of ss.getSheets()){
+    if(!sh.getName().startsWith('結果')||sh.getLastRow()<2)continue;
+    const col=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].indexOf('提交編號')+1;
+    if(col&&sh.getRange(2,col,sh.getLastRow()-1,1).getValues().some(r=>String(r[0])===String(id)))return true;
+  }
+  return false;
+}
 function quizFinalize_(record) {
   if(!record)throw Error('找不到考卷備份');
   if(String(record.data[7])==='已完成')return;
   const p=JSON.parse(String(record.data[8]));
   try {
-    if(!v4QuizSubmitted(p.group,p.name,String(p.roundId))) {
+    if(!quizOfficialById_(p.submissionId)) {
       const result=handleSubmitQuiz(p,true);
       if(result.status!=='success')throw Error(result.error||'成績寫入失敗');
     }
@@ -1392,7 +1403,8 @@ function v2Post(e) {
     if(['addBonusPoints','saveTransferRecord'].includes(action)) p.admin=user.name;
     if(action==='submitQuiz') {
       if(!p.roundId || String(p.roundId)!==v4QuizRound()) throw Error('測驗梯次已變更，請重新載入考卷');
-      v2VerifyQuiz(p);
+      p.submissionId=String(p.submissionId||Utilities.getUuid());
+      return JSONResponse(v2WithLock(()=>quizReceive_(p,user)));
     }
     if(action==='createBonusSheet') return JSONResponse(v2WithLock(()=>handleCreateBonusSheet(user.name)));
     if(['addBonusPoints','submitHomework','submitQuiz','updateConfig','updateAnnouncement','updateHomeworkSettings'].includes(action))
